@@ -16,6 +16,8 @@ module Indexer
       case action
       when 'decode_and_store'
         decode_and_store(params)
+      when 'enqueue_token_metadata'
+        enqueue_token_metadata(params)
       when 'fetch_token_metadata'
         fetch_token_metadata(params)
       end
@@ -149,6 +151,25 @@ module Indexer
       end
 
       { processed: processed }
+    end
+
+    # Lightweight: just create placeholder records in DB, no RPC calls
+    def enqueue_token_metadata(params)
+      chain_id = params['chain_id']
+      token_addresses = params['token_addresses'] || []
+      enqueued = 0
+
+      token_addresses.each do |address|
+        next if address.blank?
+        TokenContract.find_or_create_by!(address: address.downcase, chain_id: chain_id) do |tc|
+          tc.standard = 'unknown'
+          enqueued += 1
+        end
+      rescue StandardError => e
+        Rails.logger.debug("Token enqueue failed for #{address}: #{e.message}")
+      end
+
+      { enqueued: enqueued }
     end
 
     # Decode ERC-20/721 Transfer event

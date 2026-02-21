@@ -73,22 +73,21 @@ module Indexer
         retry_policy: retry_policy
       )
 
-      # 5. Fetch token metadata for new tokens (best-effort, don't block on failure)
+      # 5. Queue unknown token addresses for async metadata fetch (DB only, no RPC)
       if decode_result && decode_result['token_addresses']&.any?
         begin
           Temporalio::Workflow.execute_activity(
             Indexer::DecodeTransfersActivity,
             {
-              'action' => 'fetch_token_metadata',
+              'action' => 'enqueue_token_metadata',
               'chain_id' => chain_id,
               'token_addresses' => decode_result['token_addresses']
             },
-            schedule_to_close_timeout: 30,
+            schedule_to_close_timeout: 10,
             retry_policy: Temporalio::RetryPolicy.new(max_attempts: 1)
           )
         rescue => e
-          # Token metadata is non-critical — log and continue
-          Temporalio::Workflow.logger.warn("Token metadata fetch failed (non-fatal): #{e.message}")
+          Temporalio::Workflow.logger.warn("Token enqueue failed (non-fatal): #{e.message}")
         end
       end
 
