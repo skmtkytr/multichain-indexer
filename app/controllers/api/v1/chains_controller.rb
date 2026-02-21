@@ -84,7 +84,7 @@ module Api
           :chain_id, :name, :rpc_url, :rpc_url_fallback,
           :explorer_url, :native_currency, :block_time_ms,
           :poll_interval_seconds, :blocks_per_batch,
-          :max_rpc_batch_size, :enabled
+          :max_rpc_batch_size, :enabled, :network_type
         )
       end
 
@@ -92,6 +92,7 @@ module Api
         {
           chain_id: chain.chain_id,
           name: chain.name,
+          network_type: chain.network_type,
           rpc_url: mask_url(chain.rpc_url),
           rpc_url_fallback: chain.rpc_url_fallback.present? ? mask_url(chain.rpc_url_fallback) : nil,
           explorer_url: chain.explorer_url,

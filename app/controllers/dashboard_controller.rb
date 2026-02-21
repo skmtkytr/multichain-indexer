@@ -129,6 +129,9 @@ class DashboardController < ApplicationController
       .chain-card-badge { padding: 2px 8px; border-radius: 12px; font-size: 10px; font-weight: 600; text-transform: uppercase; }
       .badge-enabled { background: #23863615; color: #3fb950; border: 1px solid #23863640; }
       .badge-disabled { background: #f8514915; color: #f85149; border: 1px solid #f8514940; }
+      .badge-mainnet { background: #388bfd15; color: #58a6ff; border: 1px solid #388bfd40; }
+      .badge-testnet { background: #d2992215; color: #d29922; border: 1px solid #d2992240; }
+      .badge-devnet { background: #8b949e15; color: #8b949e; border: 1px solid #8b949e40; }
       .chain-card-body { font-size: 12px; color: #8b949e; }
       .chain-card-row { display: flex; justify-content: space-between; padding: 4px 0; border-bottom: 1px solid #21262d; }
       .chain-card-row:last-child { border-bottom: none; }
@@ -167,17 +170,18 @@ class DashboardController < ApplicationController
   end
 
   def sidebar
-    chain_items = @chain_configs.map do |c|
-      cursor = IndexerCursor.find_by(chain_id: c.chain_id)
-      status = cursor&.status || "not_initialized"
-      active = c.chain_id == @stats[:chain_id] && @page != "chains" ? "active" : ""
-      <<~ITEM
-        <a class="nav-chain #{active}" href="/?chain_id=#{c.chain_id}">
-          <span class="nav-chain-name"><span class="dot #{status}"></span> #{h c.name}</span>
-          <span style="color:#484f58;font-size:10px">#{c.chain_id}</span>
-        </a>
-      ITEM
-    end.join
+    mainnet_chains = @chain_configs.select { |c| c.network_type == "mainnet" }
+    testnet_chains = @chain_configs.select { |c| c.network_type != "mainnet" }
+
+    chain_items = ""
+    if mainnet_chains.any?
+      chain_items += '<div class="nav-section">Mainnet</div>'
+      chain_items += mainnet_chains.map { |c| chain_nav_item(c) }.join
+    end
+    if testnet_chains.any?
+      chain_items += '<div class="nav-section">Testnet</div>'
+      chain_items += testnet_chains.map { |c| chain_nav_item(c) }.join
+    end
 
     <<~HTML
       <aside class="sidebar">
@@ -190,7 +194,6 @@ class DashboardController < ApplicationController
         <a class="nav-item #{@page != 'chains' ? 'active' : ''}" href="/?chain_id=#{@stats[:chain_id]}">📊 Overview</a>
         <a class="nav-item #{@page == 'chains' ? 'active' : ''}" href="/?page=chains">⚙️ Chain Config</a>
 
-        <div class="nav-section">Chains</div>
         #{chain_items}
 
         <div class="nav-section external-link">
@@ -259,37 +262,16 @@ class DashboardController < ApplicationController
   end
 
   def chains_page
-    cards = @chain_configs.map do |c|
-      cursor = IndexerCursor.find_by(chain_id: c.chain_id)
-      status = cursor&.status || "not_initialized"
-      <<~CARD
-        <div class="chain-card #{c.enabled? ? '' : 'disabled'}" id="chain-card-#{c.chain_id}">
-          <div class="chain-card-header">
-            <div>
-              <div class="chain-card-title">#{h c.name}</div>
-              <div class="chain-card-id">Chain ID: #{c.chain_id}</div>
-            </div>
-            <span class="chain-card-badge #{c.enabled? ? 'badge-enabled' : 'badge-disabled'}">#{c.enabled? ? 'Enabled' : 'Disabled'}</span>
-          </div>
-          <div class="chain-card-body">
-            <div class="chain-card-row"><span class="chain-card-label">RPC</span><span class="chain-card-value" title="#{h c.rpc_url}">#{h c.rpc_url}</span></div>
-            #{c.rpc_url_fallback.present? ? "<div class=\"chain-card-row\"><span class=\"chain-card-label\">Fallback</span><span class=\"chain-card-value\">#{h c.rpc_url_fallback}</span></div>" : ''}
-            <div class="chain-card-row"><span class="chain-card-label">Currency</span><span class="chain-card-value">#{h c.native_currency}</span></div>
-            <div class="chain-card-row"><span class="chain-card-label">Block Time</span><span class="chain-card-value">#{c.block_time_ms}ms</span></div>
-            <div class="chain-card-row"><span class="chain-card-label">Poll Interval</span><span class="chain-card-value">#{c.poll_interval_seconds}s</span></div>
-            <div class="chain-card-row"><span class="chain-card-label">Batch Size</span><span class="chain-card-value">#{c.blocks_per_batch}</span></div>
-            <div class="chain-card-row"><span class="chain-card-label">Status</span><span class="chain-card-value"><span class="dot #{status}" style="display:inline-block;margin-right:4px"></span>#{status}</span></div>
-            <div class="chain-card-row"><span class="chain-card-label">Last Block</span><span class="chain-card-value">#{format_number(cursor&.last_indexed_block || 0)}</span></div>
-          </div>
-          <div class="chain-card-actions">
-            <button class="btn btn-sm btn-test" onclick="testChain(#{c.chain_id})">🔌 Test RPC</button>
-            <button class="btn btn-sm btn-outline" onclick="editChain(#{c.chain_id})">✏️ Edit</button>
-            <button class="btn btn-sm btn-outline" onclick="toggleChain(#{c.chain_id}, #{!c.enabled?})">#{c.enabled? ? '⏸ Disable' : '▶ Enable'}</button>
-          </div>
-          <div id="test-result-#{c.chain_id}" style="margin-top:8px;font-size:11px;color:#8b949e;display:none"></div>
-        </div>
-      CARD
-    end.join
+    cards = ""
+    grouped = @chain_configs.group_by(&:network_type)
+    %w[mainnet testnet devnet].each do |net_type|
+      chains = grouped[net_type]
+      next unless chains&.any?
+      cards += "<h3 style=\"margin-top:16px\">#{net_type.capitalize}</h3>"
+      cards += '<div class="chain-cards">'
+      cards += chains.map { |c| chain_card(c) }.join
+      cards += '</div>'
+    end
 
     <<~HTML
       <div class="page-header">
@@ -300,9 +282,7 @@ class DashboardController < ApplicationController
         <button class="btn btn-primary" onclick="showAddModal()">+ Add Chain</button>
       </div>
 
-      <div class="chain-cards">
-        #{cards}
-      </div>
+      #{cards}
 
       #{chain_modal}
     HTML
@@ -327,6 +307,14 @@ class DashboardController < ApplicationController
                 <label class="form-label">Name *</label>
                 <input class="form-input" id="f-name" type="text" placeholder="BSC">
               </div>
+            </div>
+            <div class="form-group">
+              <label class="form-label">Network Type</label>
+              <select class="form-input" id="f-network-type">
+                <option value="mainnet">Mainnet</option>
+                <option value="testnet">Testnet</option>
+                <option value="devnet">Devnet</option>
+              </select>
             </div>
             <div class="form-group">
               <label class="form-label">RPC URL *</label>
@@ -434,6 +422,7 @@ class DashboardController < ApplicationController
         document.getElementById('f-chain-id').value = '';
         document.getElementById('f-chain-id').disabled = false;
         document.getElementById('f-name').value = '';
+        document.getElementById('f-network-type').value = 'mainnet';
         document.getElementById('f-rpc-url').value = '';
         document.getElementById('f-rpc-fallback').value = '';
         document.getElementById('f-explorer').value = '';
@@ -454,6 +443,7 @@ class DashboardController < ApplicationController
           document.getElementById('f-chain-id').value = c.chain_id;
           document.getElementById('f-chain-id').disabled = true;
           document.getElementById('f-name').value = c.name;
+          document.getElementById('f-network-type').value = c.network_type || 'mainnet';
           // For edit, fetch full RPC URL from a separate hidden endpoint or just leave masked
           document.getElementById('f-rpc-url').value = '';
           document.getElementById('f-rpc-url').placeholder = c.rpc_url + ' (leave blank to keep)';
@@ -477,6 +467,7 @@ class DashboardController < ApplicationController
         const body = {};
         if (mode === 'add') body.chain_id = parseInt(document.getElementById('f-chain-id').value);
         body.name = document.getElementById('f-name').value;
+        body.network_type = document.getElementById('f-network-type').value;
         const rpc = document.getElementById('f-rpc-url').value;
         if (rpc) body.rpc_url = rpc;
         const fallback = document.getElementById('f-rpc-fallback').value;
@@ -523,6 +514,58 @@ class DashboardController < ApplicationController
         setTimeout(() => location.reload(), 10000);
       }
     JS
+  end
+
+  def chain_card(c)
+    cursor = IndexerCursor.find_by(chain_id: c.chain_id)
+    status = cursor&.status || "not_initialized"
+    badge_class = case c.network_type
+                  when "mainnet" then "badge-mainnet"
+                  when "testnet" then "badge-testnet"
+                  else "badge-devnet"
+                  end
+    <<~CARD
+      <div class="chain-card #{c.enabled? ? '' : 'disabled'}" id="chain-card-#{c.chain_id}">
+        <div class="chain-card-header">
+          <div>
+            <div class="chain-card-title">#{h c.name}</div>
+            <div class="chain-card-id">Chain ID: #{c.chain_id}</div>
+          </div>
+          <div style="display:flex;gap:6px">
+            <span class="chain-card-badge #{badge_class}">#{c.network_type}</span>
+            <span class="chain-card-badge #{c.enabled? ? 'badge-enabled' : 'badge-disabled'}">#{c.enabled? ? 'Enabled' : 'Disabled'}</span>
+          </div>
+        </div>
+        <div class="chain-card-body">
+          <div class="chain-card-row"><span class="chain-card-label">RPC</span><span class="chain-card-value" title="#{h c.rpc_url}">#{h c.rpc_url}</span></div>
+          #{c.rpc_url_fallback.present? ? "<div class=\"chain-card-row\"><span class=\"chain-card-label\">Fallback</span><span class=\"chain-card-value\">#{h c.rpc_url_fallback}</span></div>" : ''}
+          <div class="chain-card-row"><span class="chain-card-label">Currency</span><span class="chain-card-value">#{h c.native_currency}</span></div>
+          <div class="chain-card-row"><span class="chain-card-label">Block Time</span><span class="chain-card-value">#{c.block_time_ms}ms</span></div>
+          <div class="chain-card-row"><span class="chain-card-label">Poll Interval</span><span class="chain-card-value">#{c.poll_interval_seconds}s</span></div>
+          <div class="chain-card-row"><span class="chain-card-label">Batch Size</span><span class="chain-card-value">#{c.blocks_per_batch}</span></div>
+          <div class="chain-card-row"><span class="chain-card-label">Status</span><span class="chain-card-value"><span class="dot #{status}" style="display:inline-block;margin-right:4px"></span>#{status}</span></div>
+          <div class="chain-card-row"><span class="chain-card-label">Last Block</span><span class="chain-card-value">#{format_number(cursor&.last_indexed_block || 0)}</span></div>
+        </div>
+        <div class="chain-card-actions">
+          <button class="btn btn-sm btn-test" onclick="testChain(#{c.chain_id})">🔌 Test RPC</button>
+          <button class="btn btn-sm btn-outline" onclick="editChain(#{c.chain_id})">✏️ Edit</button>
+          <button class="btn btn-sm btn-outline" onclick="toggleChain(#{c.chain_id}, #{!c.enabled?})">#{c.enabled? ? '⏸ Disable' : '▶ Enable'}</button>
+        </div>
+        <div id="test-result-#{c.chain_id}" style="margin-top:8px;font-size:11px;color:#8b949e;display:none"></div>
+      </div>
+    CARD
+  end
+
+  def chain_nav_item(c)
+    cursor = IndexerCursor.find_by(chain_id: c.chain_id)
+    status = cursor&.status || "not_initialized"
+    active = c.chain_id == @stats[:chain_id] && @page != "chains" ? "active" : ""
+    <<~ITEM
+      <a class="nav-chain #{active}" href="/?chain_id=#{c.chain_id}">
+        <span class="nav-chain-name"><span class="dot #{status}"></span> #{h c.name}</span>
+        <span style="color:#484f58;font-size:10px">#{c.chain_id}</span>
+      </a>
+    ITEM
   end
 
   def error_banner

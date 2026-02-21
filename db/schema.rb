@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.1].define(version: 2026_02_21_000005) do
+ActiveRecord::Schema[8.1].define(version: 2026_02_21_000006) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "pg_catalog.plpgsql"
 
@@ -24,6 +24,7 @@ ActiveRecord::Schema[8.1].define(version: 2026_02_21_000005) do
     t.integer "max_rpc_batch_size", default: 100
     t.string "name", null: false
     t.string "native_currency", default: "ETH"
+    t.string "network_type", default: "mainnet", null: false
     t.integer "poll_interval_seconds", default: 2
     t.string "rpc_url", null: false
     t.string "rpc_url_fallback"
