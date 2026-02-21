@@ -10,6 +10,9 @@ Rails.application.routes.draw do
       resources :asset_transfers, only: %i[index show]
       resources :token_contracts, only: %i[index show]
 
+      # Address monitoring
+      get 'address_transfers', to: 'address_transfers#index'
+
       # Chain management
       resources :chains, only: %i[index show create update destroy], param: :chain_id do
         post :test, on: :member
