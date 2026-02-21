@@ -29,11 +29,11 @@ class ChainConfig < ApplicationRecord
 
   # Default chain configs with public RPCs
   DEFAULTS = {
-    1 => { name: "Ethereum", rpc_url: "https://eth.llamarpc.com", native_currency: "ETH", block_time_ms: 12000, network_type: "mainnet" },
-    10 => { name: "Optimism", rpc_url: "https://mainnet.optimism.io", native_currency: "ETH", block_time_ms: 2000, network_type: "mainnet" },
-    137 => { name: "Polygon", rpc_url: "https://polygon-bor-rpc.publicnode.com", native_currency: "MATIC", block_time_ms: 2000, network_type: "mainnet" },
-    8453 => { name: "Base", rpc_url: "https://mainnet.base.org", native_currency: "ETH", block_time_ms: 2000, network_type: "mainnet" },
-    42161 => { name: "Arbitrum", rpc_url: "https://arb1.arbitrum.io/rpc", native_currency: "ETH", block_time_ms: 250, network_type: "mainnet" },
-    11155111 => { name: "Sepolia", rpc_url: "https://ethereum-sepolia-rpc.publicnode.com", native_currency: "ETH", block_time_ms: 12000, network_type: "testnet" }
+    1 => { name: "Ethereum", rpc_url: "https://eth.llamarpc.com", explorer_url: "https://etherscan.io", native_currency: "ETH", block_time_ms: 12000, network_type: "mainnet" },
+    10 => { name: "Optimism", rpc_url: "https://mainnet.optimism.io", explorer_url: "https://optimistic.etherscan.io", native_currency: "ETH", block_time_ms: 2000, network_type: "mainnet" },
+    137 => { name: "Polygon", rpc_url: "https://polygon-bor-rpc.publicnode.com", explorer_url: "https://polygonscan.com", native_currency: "MATIC", block_time_ms: 2000, network_type: "mainnet" },
+    8453 => { name: "Base", rpc_url: "https://mainnet.base.org", explorer_url: "https://basescan.org", native_currency: "ETH", block_time_ms: 2000, network_type: "mainnet" },
+    42161 => { name: "Arbitrum", rpc_url: "https://arb1.arbitrum.io/rpc", explorer_url: "https://arbiscan.io", native_currency: "ETH", block_time_ms: 250, network_type: "mainnet" },
+    11155111 => { name: "Sepolia", rpc_url: "https://ethereum-sepolia-rpc.publicnode.com", explorer_url: "https://sepolia.etherscan.io", native_currency: "ETH", block_time_ms: 12000, network_type: "testnet" }
   }.freeze
 end

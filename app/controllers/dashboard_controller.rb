@@ -3,6 +3,7 @@ class DashboardController < ApplicationController
     @chain_configs = ChainConfig.order(:chain_id)
     chain_id = params.fetch(:chain_id, @chain_configs.first&.chain_id || 1).to_i
     @current_chain = @chain_configs.find { |c| c.chain_id == chain_id } || @chain_configs.first
+    @explorer = @current_chain&.explorer_url&.chomp("/")
     @cursor = IndexerCursor.find_by(chain_id: chain_id)
     @blocks = IndexedBlock.by_chain(chain_id).recent.limit(20)
     @transactions = IndexedTransaction.by_chain(chain_id).order(block_number: :desc, tx_index: :asc).limit(20)
@@ -114,9 +115,10 @@ class DashboardController < ApplicationController
       th { background: #21262d; color: #8b949e; font-size: 10px; text-transform: uppercase; letter-spacing: 0.8px; padding: 8px 10px; text-align: left; }
       td { padding: 7px 10px; border-top: 1px solid #21262d; font-family: 'SF Mono', 'Cascadia Code', Consolas, monospace; }
       tr:hover td { background: #1c2128; }
-      .hash { color: #58a6ff; }
-      .addr { color: #d2a8ff; }
-      .num { color: #79c0ff; }
+      .hash { color: #58a6ff; text-decoration: none; }
+      .addr { color: #d2a8ff; text-decoration: none; }
+      .num { color: #79c0ff; text-decoration: none; }
+      a.hash:hover, a.addr:hover, a.num:hover { text-decoration: underline; opacity: 0.85; }
       .empty { color: #484f58; text-align: center; padding: 40px; background: #161b22; border: 1px solid #30363d; border-radius: 8px; }
 
       /* Chain config cards */
@@ -576,7 +578,7 @@ class DashboardController < ApplicationController
   def blocks_table
     return %(<div class="empty">No blocks indexed yet</div>) if @blocks.empty?
     rows = @blocks.map do |b|
-      "<tr><td class=\"num\">#{b.number}</td><td class=\"hash\">#{truncate_hash(b.block_hash)}</td><td>#{Time.at(b.timestamp).utc.strftime('%Y-%m-%d %H:%M:%S')}</td><td class=\"addr\">#{truncate_hash(b.miner)}</td><td class=\"num\">#{b.transaction_count}</td><td class=\"num\">#{format_number(b.gas_used)}</td></tr>"
+      "<tr><td>#{link_block(b.number)}</td><td>#{link_block_hash(b.block_hash, b.number)}</td><td>#{Time.at(b.timestamp).utc.strftime('%Y-%m-%d %H:%M:%S')}</td><td>#{link_address(b.miner)}</td><td class=\"num\">#{b.transaction_count}</td><td class=\"num\">#{format_number(b.gas_used)}</td></tr>"
     end.join
     "<table><thead><tr><th>Block</th><th>Hash</th><th>Timestamp</th><th>Miner</th><th>Txns</th><th>Gas</th></tr></thead><tbody>#{rows}</tbody></table>"
   end
@@ -584,7 +586,7 @@ class DashboardController < ApplicationController
   def transactions_table
     return %(<div class="empty">No transactions indexed yet</div>) if @transactions.empty?
     rows = @transactions.map do |tx|
-      "<tr><td class=\"hash\">#{truncate_hash(tx.tx_hash)}</td><td class=\"num\">#{tx.block_number}</td><td class=\"addr\">#{truncate_hash(tx.from_address)}</td><td class=\"addr\">#{truncate_hash(tx.to_address)}</td><td class=\"num\">#{format_wei(tx.value)}</td><td>#{tx.status == 1 ? '✅' : '❌'}</td></tr>"
+      "<tr><td>#{link_tx(tx.tx_hash)}</td><td>#{link_block(tx.block_number)}</td><td>#{link_address(tx.from_address)}</td><td>#{link_address(tx.to_address)}</td><td class=\"num\">#{format_wei(tx.value)}</td><td>#{tx.status == 1 ? '✅' : '❌'}</td></tr>"
     end.join
     "<table><thead><tr><th>Tx Hash</th><th>Block</th><th>From</th><th>To</th><th>Value</th><th>St</th></tr></thead><tbody>#{rows}</tbody></table>"
   end
@@ -592,7 +594,7 @@ class DashboardController < ApplicationController
   def logs_table
     return %(<div class="empty">No event logs indexed yet</div>) if @logs.empty?
     rows = @logs.map do |log|
-      "<tr><td class=\"num\">#{log.block_number}</td><td class=\"hash\">#{truncate_hash(log.tx_hash)}</td><td class=\"addr\">#{truncate_hash(log.address)}</td><td class=\"hash\">#{truncate_hash(log.topic0)}</td><td class=\"num\">#{log.log_index}</td></tr>"
+      "<tr><td>#{link_block(log.block_number)}</td><td>#{link_tx(log.tx_hash)}</td><td>#{link_address(log.address)}</td><td class=\"hash\" title=\"#{log.topic0}\">#{truncate_hash(log.topic0)}</td><td class=\"num\">#{log.log_index}</td></tr>"
     end.join
     "<table><thead><tr><th>Block</th><th>Tx Hash</th><th>Contract</th><th>Event</th><th>Idx</th></tr></thead><tbody>#{rows}</tbody></table>"
   end
@@ -600,6 +602,45 @@ class DashboardController < ApplicationController
   def truncate_hash(hash)
     return "—" if hash.blank?
     "#{hash[0..7]}...#{hash[-6..]}"
+  end
+
+  def link_block(number)
+    return "—" if number.nil?
+    if @explorer
+      "<a href=\"#{@explorer}/block/#{number}\" target=\"_blank\" class=\"num\">#{number}</a>"
+    else
+      "<span class=\"num\">#{number}</span>"
+    end
+  end
+
+  def link_tx(hash)
+    return "—" if hash.blank?
+    display = truncate_hash(hash)
+    if @explorer
+      "<a href=\"#{@explorer}/tx/#{hash}\" target=\"_blank\" class=\"hash\" title=\"#{hash}\">#{display}</a>"
+    else
+      "<span class=\"hash\" title=\"#{hash}\">#{display}</span>"
+    end
+  end
+
+  def link_address(addr)
+    return "—" if addr.blank?
+    display = truncate_hash(addr)
+    if @explorer
+      "<a href=\"#{@explorer}/address/#{addr}\" target=\"_blank\" class=\"addr\" title=\"#{addr}\">#{display}</a>"
+    else
+      "<span class=\"addr\" title=\"#{addr}\">#{display}</span>"
+    end
+  end
+
+  def link_block_hash(hash, number)
+    return "—" if hash.blank?
+    display = truncate_hash(hash)
+    if @explorer
+      "<a href=\"#{@explorer}/block/#{number}\" target=\"_blank\" class=\"hash\" title=\"#{hash}\">#{display}</a>"
+    else
+      "<span class=\"hash\" title=\"#{hash}\">#{display}</span>"
+    end
   end
 
   def format_number(num)
