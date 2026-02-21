@@ -18,7 +18,10 @@ module Api
         # Start Temporal workflow
         handle = TemporalClient.connection.start_workflow(
           Indexer::BlockPollerWorkflow,
-          args: [{ chain_id: chain_id, start_block: from_block }],
+          {
+            "chain_id" => chain_id,
+            "start_block" => from_block
+          },
           id: "evm-indexer-chain-#{chain_id}",
           task_queue: ENV.fetch("TEMPORAL_TASK_QUEUE", "evm-indexer")
         )
@@ -39,9 +42,8 @@ module Api
 
         return render json: { error: "Not found" }, status: :not_found unless cursor
 
-        # Cancel the Temporal workflow
         begin
-          handle = TemporalClient.connection.get_workflow_handle("evm-indexer-chain-#{chain_id}")
+          handle = TemporalClient.connection.workflow_handle("evm-indexer-chain-#{chain_id}")
           handle.cancel
         rescue => e
           Rails.logger.warn("Failed to cancel workflow: #{e.message}")

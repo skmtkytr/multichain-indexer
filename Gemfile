@@ -6,7 +6,7 @@ gem "rails", "~> 8.0"
 gem "pg", "~> 1.5"
 gem "puma", "~> 6.0"
 
-# Temporal
+# Temporal (official SDK)
 gem "temporalio", "~> 0.4"
 
 # Ethereum

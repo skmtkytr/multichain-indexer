@@ -1,30 +1,24 @@
 #!/usr/bin/env ruby
 require_relative "../config/environment"
+require "temporalio/worker"
 
 Rails.logger.info "Starting Temporal worker..."
 
+client = TemporalClient.connection
+
 worker = Temporalio::Worker.new(
-  client: TemporalClient.connection,
+  client: client,
   task_queue: ENV.fetch("TEMPORAL_TASK_QUEUE", "evm-indexer"),
   workflows: [
     Indexer::BlockPollerWorkflow,
     Indexer::BlockProcessorWorkflow
   ],
   activities: [
-    Indexer::Activities::FetchBlockActivity.new,
-    Indexer::Activities::ProcessBlockActivity.new,
-    Indexer::Activities::ProcessTransactionActivity.new,
-    Indexer::Activities::ProcessLogActivity.new
+    Indexer::FetchBlockActivity,
+    Indexer::ProcessBlockActivity,
+    Indexer::ProcessTransactionActivity,
+    Indexer::ProcessLogActivity
   ]
 )
 
-# Graceful shutdown
-shutdown = false
-%w[INT TERM].each do |sig|
-  Signal.trap(sig) do
-    Rails.logger.info "Received #{sig}, shutting down worker..."
-    shutdown = true
-  end
-end
-
-worker.run(shutdown_handle: -> { shutdown })
+worker.run(shutdown_signals: %w[SIGINT SIGTERM])

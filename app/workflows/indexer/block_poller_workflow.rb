@@ -1,28 +1,35 @@
+require "temporalio/workflow"
+
 module Indexer
   # Long-running workflow that continuously polls for new blocks.
   # Uses continue-as-new to avoid unbounded history growth.
-  class BlockPollerWorkflow < Temporalio::Workflow
-    workflow_query_attr :current_block
-    workflow_query_attr :status
+  class BlockPollerWorkflow < Temporalio::Workflow::Definition
+    workflow_query_attr_reader :current_block
+    workflow_query_attr_reader :poller_status
 
-    def execute(chain_id:, start_block:, poll_interval_seconds: 2, blocks_per_batch: 10)
+    def execute(params)
+      chain_id = params["chain_id"] || params[:chain_id]
+      start_block = params["start_block"] || params[:start_block]
+      poll_interval = params["poll_interval_seconds"] || params[:poll_interval_seconds] || 2
+      blocks_per_batch = params["blocks_per_batch"] || params[:blocks_per_batch] || 10
+
       @current_block = start_block
-      @status = "polling"
+      @poller_status = "polling"
       blocks_processed = 0
-      max_blocks_before_continue = 100 # continue-as-new to keep history small
+      max_blocks_before_continue = 100
 
       while blocks_processed < max_blocks_before_continue
         # Fetch latest block number from chain
-        latest = workflow.execute_activity(
-          Activities::FetchBlockActivity,
-          :get_latest_block_number,
-          args: [chain_id],
-          start_to_close_timeout: 30
+        latest = Temporalio::Workflow.execute_activity(
+          Indexer::FetchBlockActivity,
+          { "action" => "get_latest", "chain_id" => chain_id },
+          schedule_to_close_timeout: 30,
+          retry_policy: Temporalio::RetryPolicy.new(maximum_attempts: 5)
         )
 
         if @current_block > latest
           # Wait for new blocks
-          workflow.sleep(poll_interval_seconds)
+          Temporalio::Workflow.sleep(poll_interval)
           next
         end
 
@@ -30,10 +37,11 @@ module Indexer
         end_block = [@current_block + blocks_per_batch - 1, latest].min
 
         (@current_block..end_block).each do |block_number|
-          workflow.execute_child_workflow(
-            BlockProcessorWorkflow,
-            args: [{ chain_id: chain_id, block_number: block_number }],
-            id: "process-block-#{chain_id}-#{block_number}"
+          Temporalio::Workflow.execute_child_workflow(
+            Indexer::BlockProcessorWorkflow,
+            { "chain_id" => chain_id, "block_number" => block_number },
+            id: "process-block-#{chain_id}-#{block_number}",
+            task_queue: ENV.fetch("TEMPORAL_TASK_QUEUE", "evm-indexer")
           )
           blocks_processed += 1
         end
@@ -42,13 +50,20 @@ module Indexer
       end
 
       # Continue-as-new to prevent history from growing unbounded
-      @status = "continuing"
-      workflow.continue_as_new(
-        chain_id: chain_id,
-        start_block: @current_block,
-        poll_interval_seconds: poll_interval_seconds,
-        blocks_per_batch: blocks_per_batch
+      @poller_status = "continuing"
+      Temporalio::Workflow.continue_as_new(
+        {
+          "chain_id" => chain_id,
+          "start_block" => @current_block,
+          "poll_interval_seconds" => poll_interval,
+          "blocks_per_batch" => blocks_per_batch
+        }
       )
+    end
+
+    workflow_signal
+    def pause
+      @poller_status = "paused"
     end
   end
 end

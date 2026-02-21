@@ -1,7 +1,13 @@
+require "temporalio/activity"
+
 module Indexer
-  module Activities
-    class ProcessBlockActivity < Temporalio::Activity
-      def process(block_data)
+  class ProcessBlockActivity < Temporalio::Activity::Definition
+    def execute(params)
+      action = params["action"]
+
+      case action
+      when "process"
+        block_data = params["block_data"]
         chain_id = block_data["chain_id"]
         number = block_data["number"].to_i(16)
 
@@ -23,10 +29,11 @@ module Indexer
           unique_by: [:chain_id, :number]
         )
 
-        activity.logger.info("Indexed block ##{number} on chain #{chain_id}")
-      end
+        Temporalio::Activity.logger.info("Indexed block ##{number} on chain #{chain_id}")
 
-      def update_cursor(chain_id, block_number)
+      when "update_cursor"
+        chain_id = params["chain_id"]
+        block_number = params["block_number"]
         cursor = IndexerCursor.find_or_create_by!(chain_id: chain_id)
         cursor.advance!(block_number)
       end

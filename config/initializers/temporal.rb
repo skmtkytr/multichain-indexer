@@ -1,3 +1,5 @@
+require "temporalio/client"
+
 module TemporalClient
   class << self
     def connection
