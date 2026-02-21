@@ -25,7 +25,7 @@ class ChainConfig < ApplicationRecord
   DEFAULTS = {
     1 => { name: "Ethereum", rpc_url: "https://eth.llamarpc.com", native_currency: "ETH", block_time_ms: 12000 },
     10 => { name: "Optimism", rpc_url: "https://mainnet.optimism.io", native_currency: "ETH", block_time_ms: 2000 },
-    137 => { name: "Polygon", rpc_url: "https://polygon-rpc.com", native_currency: "MATIC", block_time_ms: 2000 },
+    137 => { name: "Polygon", rpc_url: "https://polygon-bor-rpc.publicnode.com", native_currency: "MATIC", block_time_ms: 2000 },
     8453 => { name: "Base", rpc_url: "https://mainnet.base.org", native_currency: "ETH", block_time_ms: 2000 },
     42161 => { name: "Arbitrum", rpc_url: "https://arb1.arbitrum.io/rpc", native_currency: "ETH", block_time_ms: 250 },
     11155111 => { name: "Sepolia", rpc_url: "https://rpc.sepolia.org", native_currency: "ETH", block_time_ms: 12000 }
