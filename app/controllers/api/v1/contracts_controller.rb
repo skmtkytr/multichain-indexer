@@ -1,13 +1,15 @@
+# frozen_string_literal: true
+
 module Api
   module V1
     class ContractsController < ApplicationController
       def index
         chain_id = params.fetch(:chain_id, 1).to_i
         contracts = IndexedTransaction.by_chain(chain_id)
-                                       .contract_creations
-                                       .order(block_number: :desc)
-                                       .limit(params.fetch(:limit, 25).to_i)
-                                       .offset(params.fetch(:offset, 0).to_i)
+                                      .contract_creations
+                                      .order(block_number: :desc)
+                                      .limit(params.fetch(:limit, 25).to_i)
+                                      .offset(params.fetch(:offset, 0).to_i)
 
         render json: contracts.map { |tx|
           {

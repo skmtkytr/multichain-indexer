@@ -1,3 +1,5 @@
+# frozen_string_literal: true
+
 module Api
   module V1
     class TransactionsController < ApplicationController
@@ -21,7 +23,7 @@ module Api
         tx = IndexedTransaction.by_chain(chain_id).find_by!(tx_hash: params[:hash])
         render json: tx
       rescue ActiveRecord::RecordNotFound
-        render json: { error: "Transaction not found" }, status: :not_found
+        render json: { error: 'Transaction not found' }, status: :not_found
       end
     end
   end

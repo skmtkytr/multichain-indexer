@@ -1,3 +1,5 @@
+# frozen_string_literal: true
+
 module Api
   module V1
     class ChainsController < ApplicationController
@@ -12,7 +14,7 @@ module Api
         chain = ChainConfig.find_by!(chain_id: params[:chain_id])
         render json: chain_json(chain)
       rescue ActiveRecord::RecordNotFound
-        render json: { error: "Chain not found" }, status: :not_found
+        render json: { error: 'Chain not found' }, status: :not_found
       end
 
       def create
@@ -34,7 +36,7 @@ module Api
           render json: { errors: chain.errors.full_messages }, status: :unprocessable_entity
         end
       rescue ActiveRecord::RecordNotFound
-        render json: { error: "Chain not found" }, status: :not_found
+        render json: { error: 'Chain not found' }, status: :not_found
       end
 
       def destroy
@@ -42,14 +44,14 @@ module Api
         cursor = IndexerCursor.find_by(chain_id: chain.chain_id)
 
         if cursor&.running?
-          render json: { error: "Stop the indexer before removing chain" }, status: :conflict
+          render json: { error: 'Stop the indexer before removing chain' }, status: :conflict
           return
         end
 
         chain.destroy!
-        render json: { status: "deleted", chain_id: chain.chain_id }
+        render json: { status: 'deleted', chain_id: chain.chain_id }
       rescue ActiveRecord::RecordNotFound
-        render json: { error: "Chain not found" }, status: :not_found
+        render json: { error: 'Chain not found' }, status: :not_found
       end
 
       # POST /api/v1/chains/:chain_id/test
@@ -67,12 +69,12 @@ module Api
           rpc_url: mask_url(chain.rpc_url),
           latest_block: block_number,
           latency_ms: latency_ms,
-          status: "ok"
+          status: 'ok'
         }
-      rescue => e
+      rescue StandardError => e
         render json: {
           chain_id: params[:chain_id].to_i,
-          status: "error",
+          status: 'error',
           error: e.message
         }, status: :bad_gateway
       end
@@ -80,12 +82,19 @@ module Api
       private
 
       def chain_params
-        params.permit(
-          :chain_id, :name, :rpc_url, :rpc_url_fallback,
+        permitted = params.permit(
+          :chain_id, :name, :rpc_url,
           :explorer_url, :native_currency, :block_time_ms,
           :poll_interval_seconds, :blocks_per_batch,
           :max_rpc_batch_size, :enabled, :network_type
         )
+        # Accept rpc_endpoints as JSON array
+        if params[:rpc_endpoints].is_a?(Array)
+          permitted[:rpc_endpoints] = params[:rpc_endpoints].map do |ep|
+            ep.permit(:url, :label, :priority).to_h
+          end
+        end
+        permitted
       end
 
       def chain_json(chain)
@@ -94,13 +103,17 @@ module Api
           name: chain.name,
           network_type: chain.network_type,
           rpc_url: mask_url(chain.rpc_url),
-          rpc_url_fallback: chain.rpc_url_fallback.present? ? mask_url(chain.rpc_url_fallback) : nil,
+          rpc_endpoints: (chain.rpc_endpoints || []).map do |ep|
+            { url: mask_url(ep["url"]), label: ep["label"], priority: ep["priority"] }
+          end,
           explorer_url: chain.explorer_url,
           native_currency: chain.native_currency,
           block_time_ms: chain.block_time_ms,
           poll_interval_seconds: chain.poll_interval_seconds,
           blocks_per_batch: chain.blocks_per_batch,
           enabled: chain.enabled,
+          supports_trace: chain.supports_trace,
+          trace_method: chain.trace_method,
           status: chain.status,
           last_indexed_block: chain.last_indexed_block
         }
@@ -111,12 +124,12 @@ module Api
         uri = URI(url)
         if uri.path.length > 10
           # Likely contains API key in path (Alchemy/Infura style)
-          masked_path = uri.path[0..10] + "..."
+          masked_path = "#{uri.path[0..10]}..."
           "#{uri.scheme}://#{uri.host}#{masked_path}"
         else
           url
         end
-      rescue
+      rescue StandardError
         url
       end
     end

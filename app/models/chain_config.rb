@@ -1,3 +1,5 @@
+# frozen_string_literal: true
+
 class ChainConfig < ApplicationRecord
   has_one :indexer_cursor, primary_key: :chain_id, foreign_key: :chain_id
 
@@ -8,15 +10,26 @@ class ChainConfig < ApplicationRecord
   validates :network_type, inclusion: { in: NETWORK_TYPES }
   validates :poll_interval_seconds, numericality: { greater_than: 0 }
   validates :blocks_per_batch, numericality: { greater_than: 0, less_than_or_equal_to: 100 }
+  validates :trace_method, inclusion: { in: %w[debug_traceBlock trace_block], allow_blank: true }
 
   scope :mainnet, -> { where(network_type: "mainnet") }
   scope :testnet, -> { where(network_type: "testnet") }
-
   scope :enabled, -> { where(enabled: true) }
 
-  # Get the active RPC URL (with fallback support)
+  # Get ordered list of RPC URLs (primary rpc_url + rpc_endpoints sorted by priority)
+  def rpc_url_list
+    urls = []
+    # rpc_endpoints sorted by priority (lower = higher priority)
+    endpoints = (rpc_endpoints || []).sort_by { |e| e["priority"] || 99 }
+    endpoints.each { |e| urls << e["url"] if e["url"].present? }
+    # Legacy rpc_url as fallback if not already included
+    urls << rpc_url if rpc_url.present? && !urls.include?(rpc_url)
+    urls.uniq
+  end
+
+  # Get the active RPC URL (first in list)
   def active_rpc_url
-    rpc_url
+    rpc_url_list.first || rpc_url
   end
 
   def status
@@ -29,11 +42,11 @@ class ChainConfig < ApplicationRecord
 
   # Default chain configs with public RPCs
   DEFAULTS = {
-    1 => { name: "Ethereum", rpc_url: "https://eth.llamarpc.com", explorer_url: "https://etherscan.io", native_currency: "ETH", block_time_ms: 12000, network_type: "mainnet" },
+    1 => { name: "Ethereum", rpc_url: "https://eth.llamarpc.com", explorer_url: "https://etherscan.io", native_currency: "ETH", block_time_ms: 12_000, network_type: "mainnet" },
     10 => { name: "Optimism", rpc_url: "https://mainnet.optimism.io", explorer_url: "https://optimistic.etherscan.io", native_currency: "ETH", block_time_ms: 2000, network_type: "mainnet" },
     137 => { name: "Polygon", rpc_url: "https://polygon-bor-rpc.publicnode.com", explorer_url: "https://polygonscan.com", native_currency: "MATIC", block_time_ms: 2000, network_type: "mainnet" },
     8453 => { name: "Base", rpc_url: "https://mainnet.base.org", explorer_url: "https://basescan.org", native_currency: "ETH", block_time_ms: 2000, network_type: "mainnet" },
     42161 => { name: "Arbitrum", rpc_url: "https://arb1.arbitrum.io/rpc", explorer_url: "https://arbiscan.io", native_currency: "ETH", block_time_ms: 250, network_type: "mainnet" },
-    11155111 => { name: "Sepolia", rpc_url: "https://ethereum-sepolia-rpc.publicnode.com", explorer_url: "https://sepolia.etherscan.io", native_currency: "ETH", block_time_ms: 12000, network_type: "testnet" }
+    11155111 => { name: "Sepolia", rpc_url: "https://ethereum-sepolia-rpc.publicnode.com", explorer_url: "https://sepolia.etherscan.io", native_currency: "ETH", block_time_ms: 12_000, network_type: "testnet" }
   }.freeze
 end

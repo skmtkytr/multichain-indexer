@@ -1,25 +1,33 @@
+# frozen_string_literal: true
+
 Rails.application.routes.draw do
   namespace :api do
     namespace :v1 do
-      resources :blocks, only: [:index, :show], param: :number
-      resources :transactions, only: [:index, :show], param: :hash
+      resources :blocks, only: %i[index show], param: :number
+      resources :transactions, only: %i[index show], param: :hash
       resources :logs, only: [:index]
-      resources :contracts, only: [:index, :show], param: :address
+      resources :contracts, only: %i[index show], param: :address
+      resources :asset_transfers, only: %i[index show]
+      resources :token_contracts, only: %i[index show]
 
       # Chain management
-      resources :chains, only: [:index, :show, :create, :update, :destroy], param: :chain_id do
+      resources :chains, only: %i[index show create update destroy], param: :chain_id do
         post :test, on: :member
       end
 
       # Indexer control
-      post "indexer/start", to: "indexer#start"
-      post "indexer/stop", to: "indexer#stop"
-      get  "indexer/status", to: "indexer#status"
+      post 'indexer/start', to: 'indexer#start'
+      post 'indexer/stop', to: 'indexer#stop'
+      get  'indexer/status', to: 'indexer#status'
     end
   end
 
-  # Dashboard
-  root "dashboard#index"
+  # Direct API access (without /api/v1 namespace)
+  resources :asset_transfers, only: %i[index show]
+  resources :token_contracts, only: %i[index show]
 
-  get "health", to: proc { [200, {}, ["ok"]] }
+  # Dashboard
+  root 'dashboard#index'
+
+  get 'health', to: proc { [200, {}, ['ok']] }
 end

@@ -1,3 +1,5 @@
+# frozen_string_literal: true
+
 class IndexedBlock < ApplicationRecord
   has_many :indexed_transactions, foreign_key: :block_number, primary_key: :number
 

@@ -1,3 +1,5 @@
+# frozen_string_literal: true
+
 module Api
   module V1
     class BlocksController < ApplicationController
@@ -16,7 +18,7 @@ module Api
         block = IndexedBlock.by_chain(chain_id).find_by!(number: params[:number])
         render json: block, include: :indexed_transactions
       rescue ActiveRecord::RecordNotFound
-        render json: { error: "Block not found" }, status: :not_found
+        render json: { error: 'Block not found' }, status: :not_found
       end
     end
   end

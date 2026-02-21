@@ -10,9 +10,31 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.1].define(version: 2026_02_21_000007) do
+ActiveRecord::Schema[8.1].define(version: 2026_02_22_000001) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "pg_catalog.plpgsql"
+
+  create_table "asset_transfers", force: :cascade do |t|
+    t.decimal "amount", precision: 78, null: false
+    t.integer "block_number", null: false
+    t.integer "chain_id", null: false
+    t.datetime "created_at", null: false
+    t.string "from_address", limit: 42
+    t.integer "log_index", default: -1
+    t.string "to_address", limit: 42
+    t.string "token_address", limit: 42
+    t.decimal "token_id", precision: 78
+    t.integer "trace_index", default: -1
+    t.string "transfer_type", null: false
+    t.string "tx_hash", null: false
+    t.datetime "updated_at", null: false
+    t.index ["chain_id", "block_number"], name: "index_asset_transfers_on_chain_id_and_block_number"
+    t.index ["chain_id", "tx_hash", "transfer_type", "log_index", "trace_index"], name: "idx_asset_transfers_unique", unique: true
+    t.index ["chain_id", "tx_hash"], name: "index_asset_transfers_on_chain_id_and_tx_hash"
+    t.index ["from_address"], name: "index_asset_transfers_on_from_address"
+    t.index ["to_address"], name: "index_asset_transfers_on_to_address"
+    t.index ["token_address", "chain_id"], name: "index_asset_transfers_on_token_address_and_chain_id"
+  end
 
   create_table "chain_configs", force: :cascade do |t|
     t.integer "block_time_ms", default: 12000
@@ -26,21 +48,34 @@ ActiveRecord::Schema[8.1].define(version: 2026_02_21_000007) do
     t.string "native_currency", default: "ETH"
     t.string "network_type", default: "mainnet", null: false
     t.integer "poll_interval_seconds", default: 2
+    t.jsonb "rpc_endpoints", default: []
     t.string "rpc_url", null: false
     t.string "rpc_url_fallback"
     t.boolean "supports_block_receipts", default: true, null: false
+    t.boolean "supports_trace", default: false
+    t.string "trace_method"
     t.datetime "updated_at", null: false
     t.index ["chain_id"], name: "index_chain_configs_on_chain_id", unique: true
   end
 
+  create_table "event_signatures", force: :cascade do |t|
+    t.jsonb "abi_json"
+    t.datetime "created_at", null: false
+    t.string "event_name", null: false
+    t.string "full_signature", null: false
+    t.string "signature_hash", null: false
+    t.datetime "updated_at", null: false
+    t.index ["signature_hash"], name: "index_event_signatures_on_signature_hash", unique: true
+  end
+
   create_table "indexed_blocks", force: :cascade do |t|
-    t.bigint "base_fee_per_gas"
+    t.decimal "base_fee_per_gas", precision: 78
     t.string "block_hash", limit: 66, null: false
     t.integer "chain_id", default: 1, null: false
     t.datetime "created_at", null: false
     t.jsonb "extra_data", default: {}
-    t.bigint "gas_limit"
-    t.bigint "gas_used"
+    t.decimal "gas_limit", precision: 78
+    t.decimal "gas_used", precision: 78
     t.string "miner", limit: 42
     t.bigint "number", null: false
     t.string "parent_hash", limit: 66, null: false
@@ -80,11 +115,11 @@ ActiveRecord::Schema[8.1].define(version: 2026_02_21_000007) do
     t.datetime "created_at", null: false
     t.jsonb "extra_data", default: {}
     t.string "from_address", limit: 42, null: false
-    t.bigint "gas_price"
-    t.bigint "gas_used"
+    t.decimal "gas_price", precision: 78
+    t.decimal "gas_used", precision: 78
     t.text "input_data"
-    t.bigint "max_fee_per_gas"
-    t.bigint "max_priority_fee_per_gas"
+    t.decimal "max_fee_per_gas", precision: 78
+    t.decimal "max_priority_fee_per_gas", precision: 78
     t.integer "status"
     t.string "to_address", limit: 42
     t.string "tx_hash", limit: 66, null: false
@@ -106,5 +141,18 @@ ActiveRecord::Schema[8.1].define(version: 2026_02_21_000007) do
     t.string "status", default: "stopped", null: false
     t.datetime "updated_at", null: false
     t.index ["chain_id"], name: "index_indexer_cursors_on_chain_id", unique: true
+  end
+
+  create_table "token_contracts", force: :cascade do |t|
+    t.string "address", limit: 42, null: false
+    t.integer "chain_id", null: false
+    t.datetime "created_at", null: false
+    t.integer "decimals"
+    t.string "name"
+    t.string "standard"
+    t.string "symbol"
+    t.decimal "total_supply", precision: 78
+    t.datetime "updated_at", null: false
+    t.index ["chain_id", "address"], name: "index_token_contracts_on_chain_id_and_address", unique: true
   end
 end

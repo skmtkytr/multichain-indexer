@@ -1,3 +1,5 @@
+# frozen_string_literal: true
+
 class CreateIndexedBlocks < ActiveRecord::Migration[8.0]
   def change
     create_table :indexed_blocks do |t|
@@ -15,7 +17,7 @@ class CreateIndexedBlocks < ActiveRecord::Migration[8.0]
       t.timestamps
     end
 
-    add_index :indexed_blocks, [:chain_id, :number], unique: true
+    add_index :indexed_blocks, %i[chain_id number], unique: true
     add_index :indexed_blocks, :block_hash, unique: true
     add_index :indexed_blocks, :timestamp
   end

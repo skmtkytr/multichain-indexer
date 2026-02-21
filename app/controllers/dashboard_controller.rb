@@ -1,25 +1,31 @@
+# frozen_string_literal: true
+
 class DashboardController < ApplicationController
   def index
     @chain_configs = ChainConfig.order(:chain_id)
     chain_id = params.fetch(:chain_id, @chain_configs.first&.chain_id || 1).to_i
     @current_chain = @chain_configs.find { |c| c.chain_id == chain_id } || @chain_configs.first
-    @explorer = @current_chain&.explorer_url&.chomp("/")
+    @explorer = @current_chain&.explorer_url&.chomp('/')
     @cursor = IndexerCursor.find_by(chain_id: chain_id)
     @blocks = IndexedBlock.by_chain(chain_id).recent.limit(20)
     @transactions = IndexedTransaction.by_chain(chain_id).order(block_number: :desc, tx_index: :asc).limit(20)
     @logs = IndexedLog.by_chain(chain_id).order(block_number: :desc, log_index: :asc).limit(20)
+    @asset_transfers = AssetTransfer.by_chain(chain_id).recent.limit(20)
+    @token_contracts = TokenContract.by_chain(chain_id).limit(20)
 
     @stats = {
       chain_id: chain_id,
-      status: @cursor&.status || "not_initialized",
+      status: @cursor&.status || 'not_initialized',
       last_indexed_block: @cursor&.last_indexed_block || 0,
       error: @cursor&.error_message,
       blocks_count: IndexedBlock.by_chain(chain_id).count,
       transactions_count: IndexedTransaction.by_chain(chain_id).count,
-      logs_count: IndexedLog.by_chain(chain_id).count
+      logs_count: IndexedLog.by_chain(chain_id).count,
+      transfers_count: AssetTransfer.by_chain(chain_id).count,
+      tokens_count: TokenContract.by_chain(chain_id).count
     }
 
-    @page = params.fetch(:page, "overview")
+    @page = params.fetch(:page, 'overview')
 
     render html: build_html.html_safe, layout: false
   end
@@ -40,7 +46,14 @@ class DashboardController < ApplicationController
         <div class="layout">
           #{sidebar}
           <main class="main">
-            #{@page == "chains" ? chains_page : overview_page}
+            #{
+              case @page
+              when 'chains' then chains_page
+              when 'transfers' then transfers_page
+              when 'tokens' then tokens_page
+              else overview_page
+              end
+            }
           </main>
         </div>
         <script>#{javascript}</script>
@@ -172,10 +185,10 @@ class DashboardController < ApplicationController
   end
 
   def sidebar
-    mainnet_chains = @chain_configs.select { |c| c.network_type == "mainnet" }
-    testnet_chains = @chain_configs.select { |c| c.network_type != "mainnet" }
+    mainnet_chains = @chain_configs.select { |c| c.network_type == 'mainnet' }
+    testnet_chains = @chain_configs.reject { |c| c.network_type == 'mainnet' }
 
-    chain_items = ""
+    chain_items = ''
     if mainnet_chains.any?
       chain_items += '<div class="nav-section">Mainnet</div>'
       chain_items += mainnet_chains.map { |c| chain_nav_item(c) }.join
@@ -193,7 +206,9 @@ class DashboardController < ApplicationController
         </div>
 
         <div class="nav-section">Navigation</div>
-        <a class="nav-item #{@page != 'chains' ? 'active' : ''}" href="/?chain_id=#{@stats[:chain_id]}">📊 Overview</a>
+        <a class="nav-item #{@page == 'overview' || @page.blank? ? 'active' : ''}" href="/?chain_id=#{@stats[:chain_id]}">📊 Overview</a>
+        <a class="nav-item #{@page == 'transfers' ? 'active' : ''}" href="/?page=transfers&chain_id=#{@stats[:chain_id]}">💸 Asset Transfers</a>
+        <a class="nav-item #{@page == 'tokens' ? 'active' : ''}" href="/?page=tokens&chain_id=#{@stats[:chain_id]}">🪙 Token Contracts</a>
         <a class="nav-item #{@page == 'chains' ? 'active' : ''}" href="/?page=chains">⚙️ Chain Config</a>
 
         #{chain_items}
@@ -236,6 +251,14 @@ class DashboardController < ApplicationController
           <div class="stat-label">Event Logs</div>
           <div class="stat-value">#{format_number(@stats[:logs_count])}</div>
         </div>
+        <div class="stat-card">
+          <div class="stat-label">Asset Transfers</div>
+          <div class="stat-value">#{format_number(@stats[:transfers_count])}</div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-label">Token Contracts</div>
+          <div class="stat-value">#{format_number(@stats[:tokens_count])}</div>
+        </div>
       </div>
 
       #{error_banner}
@@ -264,11 +287,12 @@ class DashboardController < ApplicationController
   end
 
   def chains_page
-    cards = ""
+    cards = ''
     grouped = @chain_configs.group_by(&:network_type)
     %w[mainnet testnet devnet].each do |net_type|
       chains = grouped[net_type]
       next unless chains&.any?
+
       cards += "<h3 style=\"margin-top:16px\">#{net_type.capitalize}</h3>"
       cards += '<div class="chain-cards">'
       cards += chains.map { |c| chain_card(c) }.join
@@ -324,8 +348,10 @@ class DashboardController < ApplicationController
               <div class="form-hint">HTTPS endpoint for JSON-RPC. Alchemy/Infura URLs with API keys supported.</div>
             </div>
             <div class="form-group">
-              <label class="form-label">Fallback RPC URL</label>
-              <input class="form-input" id="f-rpc-fallback" type="url" placeholder="Optional backup endpoint">
+              <label class="form-label">Additional RPC Endpoints</label>
+              <div id="rpc-endpoints-list"></div>
+              <button class="btn btn-sm btn-outline" type="button" onclick="addRpcEndpoint()" style="margin-top:6px">+ Add Endpoint</button>
+              <div class="form-hint">Priority: lower number = higher priority. Label is optional.</div>
             </div>
             <div class="form-group">
               <label class="form-label">Explorer URL</label>
@@ -418,6 +444,29 @@ class DashboardController < ApplicationController
       }
 
       // Modal
+      let rpcEndpointIdx = 0;
+      function addRpcEndpoint(url='', label='', priority='') {
+        const list = document.getElementById('rpc-endpoints-list');
+        const idx = rpcEndpointIdx++;
+        const row = document.createElement('div');
+        row.className = 'form-row';
+        row.style.marginBottom = '6px';
+        row.id = 'rpc-ep-' + idx;
+        row.innerHTML = '<div class="form-group" style="margin:0;grid-column:span 2"><div style="display:flex;gap:6px"><input class="form-input rpc-ep-url" type="url" placeholder="https://..." value="'+url+'" style="flex:3"><input class="form-input rpc-ep-label" type="text" placeholder="Label" value="'+label+'" style="flex:1"><input class="form-input rpc-ep-priority" type="number" placeholder="P" value="'+priority+'" style="flex:0.5;min-width:50px"><button class="btn btn-sm btn-danger" type="button" onclick="document.getElementById(\\'rpc-ep-'+idx+'\\').remove()">✕</button></div></div>';
+        list.appendChild(row);
+      }
+
+      function getRpcEndpoints() {
+        const eps = [];
+        document.querySelectorAll('#rpc-endpoints-list .form-row').forEach(row => {
+          const url = row.querySelector('.rpc-ep-url')?.value;
+          const label = row.querySelector('.rpc-ep-label')?.value;
+          const priority = parseInt(row.querySelector('.rpc-ep-priority')?.value) || 99;
+          if (url) eps.push({ url, label: label || '', priority });
+        });
+        return eps;
+      }
+
       function showAddModal() {
         document.getElementById('modalMode').value = 'add';
         document.getElementById('modalTitle').textContent = 'Add Chain';
@@ -426,7 +475,8 @@ class DashboardController < ApplicationController
         document.getElementById('f-name').value = '';
         document.getElementById('f-network-type').value = 'mainnet';
         document.getElementById('f-rpc-url').value = '';
-        document.getElementById('f-rpc-fallback').value = '';
+        document.getElementById('rpc-endpoints-list').innerHTML = '';
+        rpcEndpointIdx = 0;
         document.getElementById('f-explorer').value = '';
         document.getElementById('f-currency').value = 'ETH';
         document.getElementById('f-block-time').value = '12000';
@@ -449,7 +499,9 @@ class DashboardController < ApplicationController
           // For edit, fetch full RPC URL from a separate hidden endpoint or just leave masked
           document.getElementById('f-rpc-url').value = '';
           document.getElementById('f-rpc-url').placeholder = c.rpc_url + ' (leave blank to keep)';
-          document.getElementById('f-rpc-fallback').value = '';
+          document.getElementById('rpc-endpoints-list').innerHTML = '';
+          rpcEndpointIdx = 0;
+          (c.rpc_endpoints || []).forEach(ep => addRpcEndpoint(ep.url || '', ep.label || '', ep.priority || ''));
           document.getElementById('f-explorer').value = c.explorer_url || '';
           document.getElementById('f-currency').value = c.native_currency;
           document.getElementById('f-block-time').value = c.block_time_ms;
@@ -472,8 +524,8 @@ class DashboardController < ApplicationController
         body.network_type = document.getElementById('f-network-type').value;
         const rpc = document.getElementById('f-rpc-url').value;
         if (rpc) body.rpc_url = rpc;
-        const fallback = document.getElementById('f-rpc-fallback').value;
-        if (fallback) body.rpc_url_fallback = fallback;
+        const endpoints = getRpcEndpoints();
+        if (endpoints.length > 0) body.rpc_endpoints = endpoints;
         body.explorer_url = document.getElementById('f-explorer').value || null;
         body.native_currency = document.getElementById('f-currency').value;
         body.block_time_ms = parseInt(document.getElementById('f-block-time').value);
@@ -520,11 +572,11 @@ class DashboardController < ApplicationController
 
   def chain_card(c)
     cursor = IndexerCursor.find_by(chain_id: c.chain_id)
-    status = cursor&.status || "not_initialized"
+    status = cursor&.status || 'not_initialized'
     badge_class = case c.network_type
-                  when "mainnet" then "badge-mainnet"
-                  when "testnet" then "badge-testnet"
-                  else "badge-devnet"
+                  when 'mainnet' then 'badge-mainnet'
+                  when 'testnet' then 'badge-testnet'
+                  else 'badge-devnet'
                   end
     <<~CARD
       <div class="chain-card #{c.enabled? ? '' : 'disabled'}" id="chain-card-#{c.chain_id}">
@@ -540,7 +592,7 @@ class DashboardController < ApplicationController
         </div>
         <div class="chain-card-body">
           <div class="chain-card-row"><span class="chain-card-label">RPC</span><span class="chain-card-value" title="#{h c.rpc_url}">#{h c.rpc_url}</span></div>
-          #{c.rpc_url_fallback.present? ? "<div class=\"chain-card-row\"><span class=\"chain-card-label\">Fallback</span><span class=\"chain-card-value\">#{h c.rpc_url_fallback}</span></div>" : ''}
+          #{(c.rpc_endpoints || []).map { |ep| "<div class=\"chain-card-row\"><span class=\"chain-card-label\">#{h(ep['label'] || 'Endpoint')} (P#{ep['priority'] || '?'})</span><span class=\"chain-card-value\">#{h ep['url']}</span></div>" }.join}
           <div class="chain-card-row"><span class="chain-card-label">Currency</span><span class="chain-card-value">#{h c.native_currency}</span></div>
           <div class="chain-card-row"><span class="chain-card-label">Block Time</span><span class="chain-card-value">#{c.block_time_ms}ms</span></div>
           <div class="chain-card-row"><span class="chain-card-label">Poll Interval</span><span class="chain-card-value">#{c.poll_interval_seconds}s</span></div>
@@ -560,8 +612,8 @@ class DashboardController < ApplicationController
 
   def chain_nav_item(c)
     cursor = IndexerCursor.find_by(chain_id: c.chain_id)
-    status = cursor&.status || "not_initialized"
-    active = c.chain_id == @stats[:chain_id] && @page != "chains" ? "active" : ""
+    status = cursor&.status || 'not_initialized'
+    active = c.chain_id == @stats[:chain_id] && @page != 'chains' ? 'active' : ''
     <<~ITEM
       <a class="nav-chain #{active}" href="/?chain_id=#{c.chain_id}">
         <span class="nav-chain-name"><span class="dot #{status}"></span> #{h c.name}</span>
@@ -571,20 +623,24 @@ class DashboardController < ApplicationController
   end
 
   def error_banner
-    return "" unless @cursor&.error_message.present?
+    return '' unless @cursor&.error_message.present?
+
     %(<div class="error-banner">⚠️ #{h @cursor.error_message}</div>)
   end
 
   def blocks_table
     return %(<div class="empty">No blocks indexed yet</div>) if @blocks.empty?
+
     rows = @blocks.map do |b|
-      "<tr><td>#{link_block(b.number)}</td><td>#{link_block_hash(b.block_hash, b.number)}</td><td>#{Time.at(b.timestamp).utc.strftime('%Y-%m-%d %H:%M:%S')}</td><td>#{link_address(b.miner)}</td><td class=\"num\">#{b.transaction_count}</td><td class=\"num\">#{format_number(b.gas_used)}</td></tr>"
+      "<tr><td>#{link_block(b.number)}</td><td>#{link_block_hash(b.block_hash,
+                                                                 b.number)}</td><td>#{Time.at(b.timestamp).utc.strftime('%Y-%m-%d %H:%M:%S')}</td><td>#{link_address(b.miner)}</td><td class=\"num\">#{b.transaction_count}</td><td class=\"num\">#{format_number(b.gas_used)}</td></tr>"
     end.join
     "<table><thead><tr><th>Block</th><th>Hash</th><th>Timestamp</th><th>Miner</th><th>Txns</th><th>Gas</th></tr></thead><tbody>#{rows}</tbody></table>"
   end
 
   def transactions_table
     return %(<div class="empty">No transactions indexed yet</div>) if @transactions.empty?
+
     rows = @transactions.map do |tx|
       "<tr><td>#{link_tx(tx.tx_hash)}</td><td>#{link_block(tx.block_number)}</td><td>#{link_address(tx.from_address)}</td><td>#{link_address(tx.to_address)}</td><td class=\"num\">#{format_wei(tx.value)}</td><td>#{tx.status == 1 ? '✅' : '❌'}</td></tr>"
     end.join
@@ -593,6 +649,7 @@ class DashboardController < ApplicationController
 
   def logs_table
     return %(<div class="empty">No event logs indexed yet</div>) if @logs.empty?
+
     rows = @logs.map do |log|
       "<tr><td>#{link_block(log.block_number)}</td><td>#{link_tx(log.tx_hash)}</td><td>#{link_address(log.address)}</td><td class=\"hash\" title=\"#{log.topic0}\">#{truncate_hash(log.topic0)}</td><td class=\"num\">#{log.log_index}</td></tr>"
     end.join
@@ -600,12 +657,14 @@ class DashboardController < ApplicationController
   end
 
   def truncate_hash(hash)
-    return "—" if hash.blank?
+    return '—' if hash.blank?
+
     "#{hash[0..7]}...#{hash[-6..]}"
   end
 
   def link_block(number)
-    return "—" if number.nil?
+    return '—' if number.nil?
+
     if @explorer
       "<a href=\"#{@explorer}/block/#{number}\" target=\"_blank\" class=\"num\">#{number}</a>"
     else
@@ -614,7 +673,8 @@ class DashboardController < ApplicationController
   end
 
   def link_tx(hash)
-    return "—" if hash.blank?
+    return '—' if hash.blank?
+
     display = truncate_hash(hash)
     if @explorer
       "<a href=\"#{@explorer}/tx/#{hash}\" target=\"_blank\" class=\"hash\" title=\"#{hash}\">#{display}</a>"
@@ -624,7 +684,8 @@ class DashboardController < ApplicationController
   end
 
   def link_address(addr)
-    return "—" if addr.blank?
+    return '—' if addr.blank?
+
     display = truncate_hash(addr)
     if @explorer
       "<a href=\"#{@explorer}/address/#{addr}\" target=\"_blank\" class=\"addr\" title=\"#{addr}\">#{display}</a>"
@@ -634,7 +695,8 @@ class DashboardController < ApplicationController
   end
 
   def link_block_hash(hash, number)
-    return "—" if hash.blank?
+    return '—' if hash.blank?
+
     display = truncate_hash(hash)
     if @explorer
       "<a href=\"#{@explorer}/block/#{number}\" target=\"_blank\" class=\"hash\" title=\"#{hash}\">#{display}</a>"
@@ -644,14 +706,110 @@ class DashboardController < ApplicationController
   end
 
   def format_number(num)
-    return "0" if num.nil? || num == 0
+    return '0' if num.nil? || num.zero?
+
     num.to_s.reverse.gsub(/(\d{3})(?=\d)/, '\\1,').reverse
   end
 
   def format_wei(wei)
-    return "0" if wei.nil? || wei == 0
+    return '0' if wei.nil? || wei.zero?
+
     eth = wei.to_f / 1e18
-    eth < 0.0001 ? "< 0.0001" : "%.4f" % eth
+    eth < 0.0001 ? '< 0.0001' : '%.4f' % eth
+  end
+
+  def transfers_page
+    <<~HTML
+      <div class="page-header">
+        <div>
+          <div class="page-title">Asset Transfers</div>
+          <div class="page-subtitle">Chain ID: #{@stats[:chain_id]} · #{format_number(@stats[:transfers_count])} total transfers</div>
+        </div>
+        <button class="btn btn-refresh" onclick="location.reload()">↻ Refresh</button>
+      </div>
+
+      <div class="section">
+        <h3>Recent Asset Transfers</h3>
+        #{transfers_table}
+      </div>
+    HTML
+  end
+
+  def tokens_page
+    <<~HTML
+      <div class="page-header">
+        <div>
+          <div class="page-title">Token Contracts</div>
+          <div class="page-subtitle">Chain ID: #{@stats[:chain_id]} · #{format_number(@stats[:tokens_count])} token contracts</div>
+        </div>
+        <button class="btn btn-refresh" onclick="location.reload()">↻ Refresh</button>
+      </div>
+
+      <div class="section">
+        <h3>Token Contracts</h3>
+        #{tokens_table}
+      </div>
+    HTML
+  end
+
+  def transfers_table
+    return %(<div class="empty">No asset transfers indexed yet</div>) if @asset_transfers.empty?
+
+    rows = @asset_transfers.map do |transfer|
+      token_info = case transfer.transfer_type
+                   when 'native', 'internal'
+                     "<span class=\"num\">#{transfer.token_symbol}</span>"
+                   else
+                     token_name = transfer.token_contract&.display_name || 'Unknown'
+                     if @explorer && transfer.token_address
+                       "<a href=\"#{@explorer}/token/#{transfer.token_address}\" target=\"_blank\" class=\"addr\" title=\"#{transfer.token_address}\">#{h token_name}</a>"
+                     else
+                       "<span class=\"addr\" title=\"#{transfer.token_address}\">#{h token_name}</span>"
+                     end
+                   end
+
+      amount_display = transfer.nft? ? "NFT ##{transfer.token_id}" : transfer.formatted_amount.to_s
+      type_badge = case transfer.transfer_type
+                   when 'native' then '<span style="color:#3fb950">ETH</span>'
+                   when 'erc20' then '<span style="color:#58a6ff">ERC20</span>'
+                   when 'erc721' then '<span style="color:#d2a8ff">ERC721</span>'
+                   when 'erc1155' then '<span style="color:#d29922">ERC1155</span>'
+                   when 'internal' then '<span style="color:#f79000">Internal</span>'
+                   else transfer.transfer_type.upcase
+                   end
+
+      "<tr><td>#{link_tx(transfer.tx_hash)}</td><td>#{link_block(transfer.block_number)}</td><td>#{type_badge}</td><td>#{token_info}</td><td>#{link_address(transfer.from_address)}</td><td>#{link_address(transfer.to_address)}</td><td class=\"num\">#{h amount_display}</td></tr>"
+    end.join
+    "<table><thead><tr><th>Tx Hash</th><th>Block</th><th>Type</th><th>Token</th><th>From</th><th>To</th><th>Amount</th></tr></thead><tbody>#{rows}</tbody></table>"
+  end
+
+  def tokens_table
+    return %(<div class="empty">No token contracts discovered yet</div>) if @token_contracts.empty?
+
+    rows = @token_contracts.map do |token|
+      name_display = if token.name.present? && token.symbol.present?
+                       "#{h token.name} (#{h token.symbol})"
+                     elsif token.symbol.present?
+                       h token.symbol
+                     elsif token.name.present?
+                       h token.name
+                     else
+                       'Unknown'
+                     end
+
+      standard_badge = case token.standard
+                       when 'erc20' then '<span style="color:#58a6ff">ERC-20</span>'
+                       when 'erc721' then '<span style="color:#d2a8ff">ERC-721</span>'
+                       when 'erc1155' then '<span style="color:#d29922">ERC-1155</span>'
+                       else '<span style="color:#8b949e">Unknown</span>'
+                       end
+
+      decimals_display = token.decimals ? token.decimals.to_s : '—'
+      transfer_count = token.asset_transfers.count
+
+      "<tr><td>#{link_address(token.address)}</td><td>#{name_display}</td><td>#{standard_badge}</td><td class=\"num\">#{decimals_display}</td><td class=\"num\">#{format_number(transfer_count)}</td></tr>"
+    end.join
+    "<table><thead><tr><th>Contract Address</th><th>Name</th><th>Standard</th><th>Decimals</th><th>Transfers</th></tr></thead><tbody>#{rows}</tbody></table>"
   end
 
   def h(str)

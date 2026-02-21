@@ -1,24 +1,26 @@
-source "https://rubygems.org"
+# frozen_string_literal: true
 
-ruby ">= 3.3"
+source 'https://rubygems.org'
 
-gem "rails", "~> 8.0"
-gem "pg", "~> 1.5"
-gem "puma", "~> 6.0"
+ruby '>= 3.3'
+
+gem 'pg', '~> 1.5'
+gem 'puma', '~> 6.0'
+gem 'rails', '~> 8.0'
 
 # Temporal (official SDK - https://github.com/temporalio/sdk-ruby)
-gem "temporalio", "~> 1.3"
+gem 'temporalio', '~> 1.3'
 
 # Ethereum
-gem "eth", "~> 0.5"
+gem 'eth', '~> 0.5'
 
 # Background & utilities
-gem "bootsnap", require: false
-gem "dotenv-rails", "~> 3.0"
+gem 'bootsnap', require: false
+gem 'dotenv-rails', '~> 3.0'
 
 group :development, :test do
-  gem "debug", platforms: %i[mri]
-  gem "rspec-rails", "~> 7.0"
-  gem "factory_bot_rails", "~> 6.0"
-  gem "rubocop-rails-omakase", require: false
+  gem 'debug', platforms: %i[mri]
+  gem 'factory_bot_rails', '~> 6.0'
+  gem 'rspec-rails', '~> 7.0'
+  gem 'rubocop-rails-omakase', require: false
 end

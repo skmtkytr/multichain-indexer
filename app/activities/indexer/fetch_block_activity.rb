@@ -1,18 +1,20 @@
-require "temporalio/activity"
+# frozen_string_literal: true
+
+require 'temporalio/activity'
 
 module Indexer
   class FetchBlockActivity < Temporalio::Activity::Definition
     def execute(params)
-      action = params["action"]
-      chain_id = params["chain_id"]
+      action = params['action']
+      chain_id = params['chain_id']
 
       case action
-      when "get_latest"
+      when 'get_latest'
         rpc = EthereumRpc.new(chain_id: chain_id)
         rpc.get_block_number
 
-      when "fetch_full_block"
-        block_number = params["block_number"]
+      when 'fetch_full_block'
+        block_number = params['block_number']
         config = ChainConfig.find_by(chain_id: chain_id)
         supports_receipts = config&.supports_block_receipts != false
 
@@ -27,11 +29,11 @@ module Indexer
         result
 
       # Legacy: keep backward compat
-      when "fetch_block"
-        block_number = params["block_number"]
+      when 'fetch_block'
+        block_number = params['block_number']
         rpc = EthereumRpc.new(chain_id: chain_id)
         block_data = rpc.get_block_by_number(block_number, full_transactions: true)
-        block_data&.merge("chain_id" => chain_id)
+        block_data&.merge('chain_id' => chain_id)
       end
     end
   end

@@ -1,3 +1,5 @@
+# frozen_string_literal: true
+
 class IndexedTransaction < ApplicationRecord
   belongs_to :indexed_block, foreign_key: :block_number, primary_key: :number, optional: true
   has_many :indexed_logs, foreign_key: :tx_hash, primary_key: :tx_hash

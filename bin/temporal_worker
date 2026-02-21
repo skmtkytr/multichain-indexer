@@ -1,30 +1,32 @@
 #!/usr/bin/env ruby
+# frozen_string_literal: true
+
 $stdout.sync = true
 $stderr.sync = true
 
-require_relative "../config/environment"
-require "temporalio/worker"
+require_relative '../config/environment'
+require 'temporalio/worker'
 
 puts "Starting Temporal worker (pid=#{Process.pid})..."
-Rails.logger.info "Starting Temporal worker..."
+Rails.logger.info 'Starting Temporal worker...'
 
 # Retry connection to Temporal server with backoff
 client = nil
 5.times do |i|
   client = TemporalClient.connection
   break
-rescue => e
+rescue StandardError => e
   wait = (i + 1) * 5
   Rails.logger.warn "Failed to connect to Temporal (attempt #{i + 1}/5): #{e.message}. Retrying in #{wait}s..."
   TemporalClient.reset!
   sleep wait
 end
 
-raise "Could not connect to Temporal after 5 attempts" if client.nil?
+raise 'Could not connect to Temporal after 5 attempts' if client.nil?
 
 worker = Temporalio::Worker.new(
   client: client,
-  task_queue: ENV.fetch("TEMPORAL_TASK_QUEUE", "evm-indexer"),
+  task_queue: ENV.fetch('TEMPORAL_TASK_QUEUE', 'evm-indexer'),
   workflows: [
     Indexer::BlockPollerWorkflow,
     Indexer::BlockProcessorWorkflow
@@ -33,9 +35,12 @@ worker = Temporalio::Worker.new(
     Indexer::FetchBlockActivity,
     Indexer::ProcessBlockActivity,
     Indexer::ProcessTransactionActivity,
-    Indexer::ProcessLogActivity
+    Indexer::ProcessLogActivity,
+    Indexer::DecodeTransfersActivity,
+    Indexer::FetchTracesActivity
   ]
 )
 
-Rails.logger.info "Temporal worker connected and running on task queue: #{ENV.fetch('TEMPORAL_TASK_QUEUE', 'evm-indexer')}"
+Rails.logger.info "Temporal worker connected and running on task queue: #{ENV.fetch('TEMPORAL_TASK_QUEUE',
+                                                                                    'evm-indexer')}"
 worker.run(shutdown_signals: %w[SIGINT SIGTERM])

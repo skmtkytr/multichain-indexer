@@ -1,3 +1,5 @@
+# frozen_string_literal: true
+
 ChainConfig::DEFAULTS.each do |chain_id, attrs|
   ChainConfig.find_or_create_by!(chain_id: chain_id) do |c|
     c.assign_attributes(attrs)
@@ -6,3 +8,6 @@ ChainConfig::DEFAULTS.each do |chain_id, attrs|
 end
 
 puts "Seed complete: #{ChainConfig.count} chains configured"
+
+# Load event signatures
+load Rails.root.join('db', 'seeds', 'event_signatures.rb')
