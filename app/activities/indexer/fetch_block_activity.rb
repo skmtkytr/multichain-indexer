@@ -16,7 +16,7 @@ module Indexer
         block_data = rpc.get_block_by_number(block_number, full_transactions: true)
 
         if block_data.nil?
-          Temporalio::Activity.logger.warn("Block #{block_number} not found on chain #{chain_id}")
+          Rails.logger.warn("Block #{block_number} not found on chain #{chain_id}")
           return nil
         end
 

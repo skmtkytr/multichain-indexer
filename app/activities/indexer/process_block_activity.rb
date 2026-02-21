@@ -29,7 +29,7 @@ module Indexer
           unique_by: [:chain_id, :number]
         )
 
-        Temporalio::Activity.logger.info("Indexed block ##{number} on chain #{chain_id}")
+        Rails.logger.info("Indexed block ##{number} on chain #{chain_id}")
 
       when "update_cursor"
         chain_id = params["chain_id"]

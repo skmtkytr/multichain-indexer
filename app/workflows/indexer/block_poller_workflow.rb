@@ -24,7 +24,7 @@ module Indexer
           Indexer::FetchBlockActivity,
           { "action" => "get_latest", "chain_id" => chain_id },
           schedule_to_close_timeout: 30,
-          retry_policy: Temporalio::RetryPolicy.new(maximum_attempts: 5)
+          retry_policy: Temporalio::RetryPolicy.new(max_attempts: 5)
         )
 
         if @current_block > latest

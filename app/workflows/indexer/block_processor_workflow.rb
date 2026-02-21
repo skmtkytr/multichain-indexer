@@ -10,7 +10,7 @@ module Indexer
       block_number = params["block_number"] || params[:block_number]
 
       retry_policy = Temporalio::RetryPolicy.new(
-        maximum_attempts: 5,
+        max_attempts: 5,
         initial_interval: 1,
         backoff_coefficient: 2.0
       )

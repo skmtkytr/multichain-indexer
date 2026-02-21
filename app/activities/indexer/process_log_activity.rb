@@ -32,7 +32,7 @@ module Indexer
 
       IndexedLog.upsert_all(records, unique_by: [:chain_id, :block_number, :log_index])
 
-      Temporalio::Activity.logger.info("Indexed #{records.size} logs for block ##{block_number}")
+      Rails.logger.info("Indexed #{records.size} logs for block ##{block_number}")
     end
   end
 end
