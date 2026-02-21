@@ -49,8 +49,14 @@ module Indexer
           )
         end
 
-        # Wait for all to complete
-        handles.each(&:result)
+        # Wait for all to complete (tolerate individual block failures)
+        handles.each do |handle|
+          begin
+            handle.result
+          rescue => e
+            Temporalio::Workflow.logger.error("Child workflow failed: #{e.message}")
+          end
+        end
 
         batch_size = end_block - @current_block + 1
         blocks_processed += batch_size
