@@ -1,0 +1,83 @@
+services:
+  # --- Infrastructure ---
+  postgres:
+    image: postgres:17-alpine
+    environment:
+      POSTGRES_USER: indexer
+      POSTGRES_PASSWORD: indexer
+      POSTGRES_DB: evm_indexer_development
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U indexer"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  temporal:
+    image: temporalio/auto-setup:latest
+    environment:
+      - DB=postgresql
+      - DB_PORT=5432
+      - POSTGRES_USER=indexer
+      - POSTGRES_PWD=indexer
+      - POSTGRES_SEEDS=postgres
+      - DYNAMIC_CONFIG_FILE_PATH=config/dynamicconfig/development-sql.yaml
+    ports:
+      - "7233:7233"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    volumes:
+      - ./docker/temporal/dynamicconfig:/etc/temporal/config/dynamicconfig
+
+  temporal-ui:
+    image: temporalio/ui:latest
+    environment:
+      - TEMPORAL_ADDRESS=temporal:7233
+      - TEMPORAL_CORS_ORIGINS=http://localhost:3000
+    ports:
+      - "8080:8080"
+    depends_on:
+      - temporal
+
+  # --- Application ---
+  web:
+    build: .
+    command: bin/rails server -b 0.0.0.0
+    ports:
+      - "3000:3000"
+    environment:
+      DATABASE_URL: postgres://indexer:indexer@postgres:5432/evm_indexer_development
+      TEMPORAL_HOST: temporal:7233
+      ETHEREUM_RPC_URL: ${ETHEREUM_RPC_URL:-https://eth.llamarpc.com}
+    volumes:
+      - .:/app
+      - bundle_cache:/usr/local/bundle
+    depends_on:
+      postgres:
+        condition: service_healthy
+      temporal:
+        condition: service_started
+
+  temporal-worker:
+    build: .
+    command: bin/temporal_worker
+    environment:
+      DATABASE_URL: postgres://indexer:indexer@postgres:5432/evm_indexer_development
+      TEMPORAL_HOST: temporal:7233
+      ETHEREUM_RPC_URL: ${ETHEREUM_RPC_URL:-https://eth.llamarpc.com}
+    volumes:
+      - .:/app
+      - bundle_cache:/usr/local/bundle
+    depends_on:
+      postgres:
+        condition: service_healthy
+      temporal:
+        condition: service_started
+
+volumes:
+  postgres_data:
+  bundle_cache:

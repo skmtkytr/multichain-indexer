@@ -1,0 +1,10 @@
+GEM
+  remote: https://rubygems.org/
+  specs:
+
+PLATFORMS
+  ruby
+  arm64-linux
+
+BUNDLED WITH
+   2.5.0
