@@ -88,9 +88,10 @@ class EthereumRpc
                  batch_get_transaction_receipts(tx_hashes)
                end
 
-    logs = get_logs(from_block: block_number, to_block: block_number)
+    # Extract logs from receipts instead of separate eth_getLogs call (saves 1 RPC call)
+    logs = (receipts || []).flat_map { |r| r["logs"] || [] }
 
-    { "block" => block.merge("chain_id" => @chain_id), "receipts" => receipts || [], "logs" => logs || [] }
+    { "block" => block.merge("chain_id" => @chain_id), "receipts" => receipts || [], "logs" => logs }
   end
 
   # Trace block for internal transactions
