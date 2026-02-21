@@ -1,7 +1,11 @@
 #!/usr/bin/env ruby
+$stdout.sync = true
+$stderr.sync = true
+
 require_relative "../config/environment"
 require "temporalio/worker"
 
+puts "Starting Temporal worker (pid=#{Process.pid})..."
 Rails.logger.info "Starting Temporal worker..."
 
 # Retry connection to Temporal server with backoff

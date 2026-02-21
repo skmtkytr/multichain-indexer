@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.1].define(version: 2026_02_21_000006) do
+ActiveRecord::Schema[8.1].define(version: 2026_02_21_000007) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "pg_catalog.plpgsql"
 
@@ -28,6 +28,7 @@ ActiveRecord::Schema[8.1].define(version: 2026_02_21_000006) do
     t.integer "poll_interval_seconds", default: 2
     t.string "rpc_url", null: false
     t.string "rpc_url_fallback"
+    t.boolean "supports_block_receipts", default: true, null: false
     t.datetime "updated_at", null: false
     t.index ["chain_id"], name: "index_chain_configs_on_chain_id", unique: true
   end

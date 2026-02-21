@@ -8,4 +8,8 @@ Rails.application.configure do
   config.active_support.deprecation = :log
   config.active_record.migration_error = :page_load
   config.log_level = :debug
+
+  # Log to STDOUT so docker logs can capture it
+  config.logger = ActiveSupport::Logger.new($stdout)
+  config.logger.formatter = config.log_formatter
 end

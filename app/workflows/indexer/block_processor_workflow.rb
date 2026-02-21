@@ -1,9 +1,10 @@
 require "temporalio/workflow"
 
 module Indexer
-  # Processes a single block: fetches data, stores block/txs/logs.
+  # Processes a single block: fetches all data (block + receipts + logs), then stores.
+  # Only 2 activities: fetch (RPC) → store (DB), minimizing RPC calls.
   class BlockProcessorWorkflow < Temporalio::Workflow::Definition
-    ACTIVITY_TIMEOUT = 60
+    ACTIVITY_TIMEOUT = 120
 
     def execute(params)
       chain_id = params["chain_id"] || params[:chain_id]
@@ -15,43 +16,30 @@ module Indexer
         backoff_coefficient: 2.0
       )
 
-      # 1. Fetch block data from chain
-      block_data = Temporalio::Workflow.execute_activity(
+      # 1. Fetch block + receipts + logs in minimal RPC calls
+      full_data = Temporalio::Workflow.execute_activity(
         Indexer::FetchBlockActivity,
-        { "action" => "fetch_block", "chain_id" => chain_id, "block_number" => block_number },
+        { "action" => "fetch_full_block", "chain_id" => chain_id, "block_number" => block_number },
         schedule_to_close_timeout: ACTIVITY_TIMEOUT,
         retry_policy: retry_policy
       )
 
-      return if block_data.nil?
+      return if full_data.nil?
 
-      # 2. Process and store block
+      # 2. Process and store everything in one DB transaction
       Temporalio::Workflow.execute_activity(
         Indexer::ProcessBlockActivity,
-        { "action" => "process", "block_data" => block_data },
-        schedule_to_close_timeout: ACTIVITY_TIMEOUT
-      )
-
-      # 3. Process each transaction
-      transactions = block_data["transactions"] || []
-      transactions.each do |tx_data|
-        Temporalio::Workflow.execute_activity(
-          Indexer::ProcessTransactionActivity,
-          { "chain_id" => chain_id, "tx_data" => tx_data },
-          schedule_to_close_timeout: ACTIVITY_TIMEOUT,
-          retry_policy: retry_policy
-        )
-      end
-
-      # 4. Fetch and process logs for the block
-      Temporalio::Workflow.execute_activity(
-        Indexer::ProcessLogActivity,
-        { "chain_id" => chain_id, "block_number" => block_number },
+        {
+          "action" => "process_full",
+          "block_data" => full_data["block"],
+          "receipts" => full_data["receipts"],
+          "logs" => full_data["logs"]
+        },
         schedule_to_close_timeout: ACTIVITY_TIMEOUT,
         retry_policy: retry_policy
       )
 
-      # 5. Update cursor
+      # 3. Update cursor
       Temporalio::Workflow.execute_activity(
         Indexer::ProcessBlockActivity,
         { "action" => "update_cursor", "chain_id" => chain_id, "block_number" => block_number },

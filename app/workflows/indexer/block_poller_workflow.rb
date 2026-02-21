@@ -3,6 +3,7 @@ require "temporalio/workflow"
 module Indexer
   # Long-running workflow that continuously polls for new blocks.
   # Uses continue-as-new to avoid unbounded history growth.
+  # Processes blocks in parallel batches for throughput.
   class BlockPollerWorkflow < Temporalio::Workflow::Definition
     workflow_query_attr_reader :current_block
     workflow_query_attr_reader :poller_status
@@ -28,30 +29,35 @@ module Indexer
         )
 
         if @current_block > latest
-          # Wait for new blocks
           Temporalio::Workflow.sleep(poll_interval)
           next
         end
 
-        # Process blocks in batches
+        # Process blocks in parallel batches
         end_block = [@current_block + blocks_per_batch - 1, latest].min
+        task_queue = ENV.fetch("TEMPORAL_TASK_QUEUE", "evm-indexer")
 
-        (@current_block..end_block).each do |block_number|
-          Temporalio::Workflow.execute_child_workflow(
+        # Start all child workflows concurrently
+        handles = (@current_block..end_block).map do |block_number|
+          Temporalio::Workflow.start_child_workflow(
             Indexer::BlockProcessorWorkflow,
             { "chain_id" => chain_id, "block_number" => block_number },
             id: "process-block-#{chain_id}-#{block_number}",
-            task_queue: ENV.fetch("TEMPORAL_TASK_QUEUE", "evm-indexer")
+            task_queue: task_queue
           )
-          blocks_processed += 1
         end
 
+        # Wait for all to complete
+        handles.each(&:result)
+
+        batch_size = end_block - @current_block + 1
+        blocks_processed += batch_size
         @current_block = end_block + 1
       end
 
       # Continue-as-new to prevent history from growing unbounded
       @poller_status = "continuing"
-      Temporalio::Workflow.continue_as_new(
+      raise Temporalio::Workflow::ContinueAsNewError.new(
         {
           "chain_id" => chain_id,
           "start_block" => @current_block,
