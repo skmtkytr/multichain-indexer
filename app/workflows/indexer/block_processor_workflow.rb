@@ -41,17 +41,22 @@ module Indexer
         retry_policy: retry_policy
       )
 
-      # 3. Fetch traces for internal transactions (if chain supports it)
+      # 3. Fetch traces for internal transactions (best-effort)
       block_number_hex = "0x#{block_number.to_s(16)}"
-      trace_data = Temporalio::Workflow.execute_activity(
-        Indexer::FetchTracesActivity,
-        {
-          'chain_id' => chain_id,
-          'block_number_hex' => block_number_hex
-        },
-        schedule_to_close_timeout: ACTIVITY_TIMEOUT,
-        retry_policy: retry_policy
-      )
+      trace_data = begin
+        Temporalio::Workflow.execute_activity(
+          Indexer::FetchTracesActivity,
+          {
+            'chain_id' => chain_id,
+            'block_number_hex' => block_number_hex
+          },
+          schedule_to_close_timeout: ACTIVITY_TIMEOUT,
+          retry_policy: Temporalio::RetryPolicy.new(max_attempts: 2)
+        )
+      rescue => e
+        Temporalio::Workflow.logger.warn("Trace fetch failed (non-fatal): #{e.message}")
+        { 'traces' => [], 'supported' => false }
+      end
 
       # 4. Decode and store asset transfers
       decode_result = Temporalio::Workflow.execute_activity(
@@ -68,18 +73,23 @@ module Indexer
         retry_policy: retry_policy
       )
 
-      # 5. Fetch token metadata for new tokens (if any found)
-      if decode_result && decode_result['token_addresses'].any?
-        Temporalio::Workflow.execute_activity(
-          Indexer::DecodeTransfersActivity,
-          {
-            'action' => 'fetch_token_metadata',
-            'chain_id' => chain_id,
-            'token_addresses' => decode_result['token_addresses']
-          },
-          schedule_to_close_timeout: 60,
-          retry_policy: retry_policy
-        )
+      # 5. Fetch token metadata for new tokens (best-effort, don't block on failure)
+      if decode_result && decode_result['token_addresses']&.any?
+        begin
+          Temporalio::Workflow.execute_activity(
+            Indexer::DecodeTransfersActivity,
+            {
+              'action' => 'fetch_token_metadata',
+              'chain_id' => chain_id,
+              'token_addresses' => decode_result['token_addresses']
+            },
+            schedule_to_close_timeout: 30,
+            retry_policy: Temporalio::RetryPolicy.new(max_attempts: 1)
+          )
+        rescue => e
+          # Token metadata is non-critical — log and continue
+          Temporalio::Workflow.logger.warn("Token metadata fetch failed (non-fatal): #{e.message}")
+        end
       end
 
       # 6. Update cursor
