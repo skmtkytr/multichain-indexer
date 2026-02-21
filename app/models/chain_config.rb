@@ -34,6 +34,6 @@ class ChainConfig < ApplicationRecord
     137 => { name: "Polygon", rpc_url: "https://polygon-bor-rpc.publicnode.com", native_currency: "MATIC", block_time_ms: 2000, network_type: "mainnet" },
     8453 => { name: "Base", rpc_url: "https://mainnet.base.org", native_currency: "ETH", block_time_ms: 2000, network_type: "mainnet" },
     42161 => { name: "Arbitrum", rpc_url: "https://arb1.arbitrum.io/rpc", native_currency: "ETH", block_time_ms: 250, network_type: "mainnet" },
-    11155111 => { name: "Sepolia", rpc_url: "https://rpc.sepolia.org", native_currency: "ETH", block_time_ms: 12000, network_type: "testnet" }
+    11155111 => { name: "Sepolia", rpc_url: "https://ethereum-sepolia-rpc.publicnode.com", native_currency: "ETH", block_time_ms: 12000, network_type: "testnet" }
   }.freeze
 end
