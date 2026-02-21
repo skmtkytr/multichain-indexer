@@ -51,6 +51,7 @@ class DashboardController < ApplicationController
               when 'chains' then chains_page
               when 'transfers' then transfers_page
               when 'tokens' then tokens_page
+              when 'address' then address_page
               else overview_page
               end
             }
@@ -181,6 +182,13 @@ class DashboardController < ApplicationController
 
       /* Error banner */
       .error-banner { background: #f8514926; border: 1px solid #f85149; border-radius: 8px; padding: 10px 14px; margin-bottom: 20px; color: #f85149; font-size: 12px; }
+
+      /* Address search */
+      .address-search-box { background: #161b22; border: 1px solid #30363d; border-radius: 8px; padding: 20px; margin-bottom: 20px; }
+      .dir-in { color: #3fb950; font-weight: 600; }
+      .dir-out { color: #f85149; font-weight: 600; }
+      .dir-self { color: #d29922; font-weight: 600; }
+      .addr-highlight { background: #388bfd20; border-radius: 3px; padding: 0 3px; }
     CSS
   end
 
@@ -209,6 +217,7 @@ class DashboardController < ApplicationController
         <a class="nav-item #{@page == 'overview' || @page.blank? ? 'active' : ''}" href="/?chain_id=#{@stats[:chain_id]}">📊 Overview</a>
         <a class="nav-item #{@page == 'transfers' ? 'active' : ''}" href="/?page=transfers&chain_id=#{@stats[:chain_id]}">💸 Asset Transfers</a>
         <a class="nav-item #{@page == 'tokens' ? 'active' : ''}" href="/?page=tokens&chain_id=#{@stats[:chain_id]}">🪙 Token Contracts</a>
+        <a class="nav-item #{@page == 'address' ? 'active' : ''}" href="/?page=address&chain_id=#{@stats[:chain_id]}">🔍 Address Lookup</a>
         <a class="nav-item #{@page == 'chains' ? 'active' : ''}" href="/?page=chains">⚙️ Chain Config</a>
 
         #{chain_items}
@@ -563,9 +572,132 @@ class DashboardController < ApplicationController
         setTimeout(() => t.remove(), 3000);
       }
 
-      // Auto-refresh on overview (not chains page)
-      if (!window.location.search.includes('page=chains')) {
+      // Auto-refresh on overview (not chains/address page)
+      if (!window.location.search.includes('page=chains') && !window.location.search.includes('page=address')) {
         setTimeout(() => location.reload(), 10000);
+      }
+
+      // Address lookup
+      let addrOffset = 0;
+      let addrCurrentData = null;
+
+      async function searchAddresses(offset = 0) {
+        const raw = document.getElementById('addr-input').value;
+        const addrs = raw.split(/[,\\n]+/).map(a => a.trim().toLowerCase()).filter(a => /^0x[0-9a-f]{40}$/.test(a));
+        if (addrs.length === 0) { showToast('Enter at least one valid address', 'error'); return; }
+
+        const chain = document.getElementById('addr-chain').value;
+        const type = document.getElementById('addr-type').value;
+        const dir = document.getElementById('addr-direction').value;
+        const limit = document.getElementById('addr-limit').value;
+        addrOffset = offset;
+
+        const status = document.getElementById('addr-status');
+        status.style.display = 'block';
+        status.textContent = 'Searching...';
+        document.getElementById('addr-search-btn').disabled = true;
+
+        let url = '/api/v1/address_transfers?addresses=' + addrs.join(',') + '&chain_id=' + chain + '&limit=' + limit + '&offset=' + offset;
+        if (type) url += '&type=' + type;
+
+        try {
+          const res = await fetch(url);
+          const data = await res.json();
+          if (!res.ok) { status.textContent = '❌ ' + (data.error || 'Error'); return; }
+
+          addrCurrentData = data;
+          const transfers = data.transfers || [];
+
+          // Filter by direction client-side
+          const filtered = dir ? transfers.filter(t => t.direction === dir) : transfers;
+
+          status.textContent = transfers.length + ' results' + (dir ? ' (' + filtered.length + ' after filter)' : '') + ' · offset ' + offset;
+
+          // Summary stats
+          renderAddrSummary(transfers, addrs);
+
+          // Table
+          renderAddrTable(filtered, addrs, chain);
+
+          // Pagination
+          const pag = document.getElementById('addr-pagination');
+          pag.style.display = 'flex';
+          document.getElementById('addr-prev').disabled = offset === 0;
+          document.getElementById('addr-next').disabled = transfers.length < parseInt(limit);
+          document.getElementById('addr-page-info').textContent = 'Showing ' + (offset + 1) + '-' + (offset + transfers.length);
+
+        } catch(e) {
+          status.textContent = '❌ ' + e.message;
+        } finally {
+          document.getElementById('addr-search-btn').disabled = false;
+        }
+      }
+
+      function addrPagePrev() {
+        const limit = parseInt(document.getElementById('addr-limit').value);
+        searchAddresses(Math.max(0, addrOffset - limit));
+      }
+      function addrPageNext() {
+        const limit = parseInt(document.getElementById('addr-limit').value);
+        searchAddresses(addrOffset + limit);
+      }
+
+      function renderAddrSummary(transfers, addrs) {
+        const addrSet = new Set(addrs);
+        let inCount = 0, outCount = 0, selfCount = 0;
+        let inNative = 0n, outNative = 0n;
+        transfers.forEach(t => {
+          if (t.direction === 'in') { inCount++; if (t.transfer_type === 'native') inNative += BigInt(t.amount); }
+          else if (t.direction === 'out') { outCount++; if (t.transfer_type === 'native') outNative += BigInt(t.amount); }
+          else { selfCount++; }
+        });
+
+        const summary = document.getElementById('addr-summary');
+        summary.style.display = 'block';
+        document.getElementById('addr-stats').innerHTML =
+          '<div class="stat-card"><div class="stat-label">↓ Incoming</div><div class="stat-value" style="color:#3fb950">' + inCount + '</div></div>' +
+          '<div class="stat-card"><div class="stat-label">↑ Outgoing</div><div class="stat-value" style="color:#f85149">' + outCount + '</div></div>' +
+          '<div class="stat-card"><div class="stat-label">↔ Self</div><div class="stat-value" style="color:#d29922">' + selfCount + '</div></div>' +
+          '<div class="stat-card"><div class="stat-label">Total</div><div class="stat-value">' + transfers.length + '</div></div>';
+      }
+
+      function renderAddrTable(transfers, addrs, chainId) {
+        const results = document.getElementById('addr-results');
+        if (transfers.length === 0) {
+          results.innerHTML = '<div class="empty">No transfers found for these addresses</div>';
+          return;
+        }
+
+        const addrSet = new Set(addrs);
+        const explorer = #{@explorer ? "'#{@explorer}'" : 'null'};
+
+        let rows = '';
+        transfers.forEach(t => {
+          const dirClass = t.direction === 'in' ? 'dir-in' : t.direction === 'out' ? 'dir-out' : 'dir-self';
+          const dirLabel = t.direction === 'in' ? '↓ IN' : t.direction === 'out' ? '↑ OUT' : '↔ SELF';
+          const typeBadge = {native:'<span style="color:#3fb950">ETH</span>',erc20:'<span style="color:#58a6ff">ERC20</span>',erc721:'<span style="color:#d2a8ff">NFT</span>',erc1155:'<span style="color:#d29922">1155</span>',internal:'<span style="color:#f79000">INT</span>'}[t.transfer_type] || t.transfer_type;
+
+          const txLink = explorer ? '<a href="' + explorer + '/tx/' + t.tx_hash + '" target="_blank" class="hash">' + t.tx_hash.slice(0,10) + '...' + '</a>' : '<span class="hash">' + t.tx_hash.slice(0,10) + '...</span>';
+
+          const fmtAddr = (addr) => {
+            if (!addr) return '—';
+            const short = addr.slice(0,8) + '...' + addr.slice(-4);
+            const cls = addrSet.has(addr) ? 'addr addr-highlight' : 'addr';
+            return explorer ? '<a href="' + explorer + '/address/' + addr + '" target="_blank" class="' + cls + '" title="' + addr + '">' + short + '</a>' : '<span class="' + cls + '" title="' + addr + '">' + short + '</span>';
+          };
+
+          const amount = t.transfer_type === 'erc721' ? 'NFT #' + (t.token_id || '?') : (t.amount_display || t.amount);
+          const symbol = t.token_symbol || '';
+
+          rows += '<tr><td>' + txLink + '</td><td class="num">' + t.block_number + '</td><td class="' + dirClass + '">' + dirLabel + '</td><td>' + typeBadge + '</td><td>' + fmtAddr(t.from_address) + '</td><td>' + fmtAddr(t.to_address) + '</td><td class="num" title="' + t.amount + '">' + amount + '</td><td>' + symbol + '</td></tr>';
+        });
+
+        results.innerHTML = '<table><thead><tr><th>Tx</th><th>Block</th><th>Dir</th><th>Type</th><th>From</th><th>To</th><th>Amount</th><th>Token</th></tr></thead><tbody>' + rows + '</tbody></table>';
+      }
+
+      // Auto-search if addresses in URL
+      if (window.location.search.includes('page=address') && document.getElementById('addr-input')?.value?.trim()) {
+        searchAddresses();
       }
     JS
   end
@@ -810,6 +942,82 @@ class DashboardController < ApplicationController
       "<tr><td>#{link_address(token.address)}</td><td>#{name_display}</td><td>#{standard_badge}</td><td class=\"num\">#{decimals_display}</td><td class=\"num\">#{format_number(transfer_count)}</td></tr>"
     end.join
     "<table><thead><tr><th>Contract Address</th><th>Name</th><th>Standard</th><th>Decimals</th><th>Transfers</th></tr></thead><tbody>#{rows}</tbody></table>"
+  end
+
+  def address_page
+    <<~HTML
+      <div class="page-header">
+        <div>
+          <div class="page-title">🔍 Address Lookup</div>
+          <div class="page-subtitle">Monitor wallet deposits & withdrawals across indexed blocks</div>
+        </div>
+      </div>
+
+      <div class="address-search-box">
+        <div class="form-group">
+          <label class="form-label">Wallet Addresses (comma-separated, max 50)</label>
+          <textarea class="form-input" id="addr-input" rows="3" placeholder="0xabc123..., 0xdef456...&#10;One address per line or comma-separated" style="resize:vertical;font-family:'SF Mono',Consolas,monospace;font-size:12px">#{h params[:addresses].to_s}</textarea>
+        </div>
+        <div class="form-row" style="grid-template-columns: 1fr 1fr 1fr 1fr auto;">
+          <div class="form-group">
+            <label class="form-label">Chain</label>
+            <select class="form-input" id="addr-chain">
+              #{@chain_configs.map { |c| "<option value=\"#{c.chain_id}\" #{c.chain_id == @stats[:chain_id] ? 'selected' : ''}>#{h c.name} (#{c.chain_id})</option>" }.join}
+            </select>
+          </div>
+          <div class="form-group">
+            <label class="form-label">Type</label>
+            <select class="form-input" id="addr-type">
+              <option value="">All</option>
+              <option value="native">Native</option>
+              <option value="erc20">ERC-20</option>
+              <option value="erc721">ERC-721</option>
+              <option value="erc1155">ERC-1155</option>
+              <option value="internal">Internal</option>
+            </select>
+          </div>
+          <div class="form-group">
+            <label class="form-label">Direction</label>
+            <select class="form-input" id="addr-direction">
+              <option value="">All</option>
+              <option value="in">↓ Incoming</option>
+              <option value="out">↑ Outgoing</option>
+              <option value="self">↔ Self</option>
+            </select>
+          </div>
+          <div class="form-group">
+            <label class="form-label">Limit</label>
+            <select class="form-input" id="addr-limit">
+              <option value="50">50</option>
+              <option value="100" selected>100</option>
+              <option value="200">200</option>
+              <option value="500">500</option>
+            </select>
+          </div>
+          <div class="form-group" style="display:flex;align-items:flex-end">
+            <button class="btn btn-primary" onclick="searchAddresses()" id="addr-search-btn">Search</button>
+          </div>
+        </div>
+      </div>
+
+      <div id="addr-status" style="margin:16px 0;font-size:13px;color:#8b949e;display:none"></div>
+
+      <div id="addr-summary" style="display:none;margin-bottom:16px;">
+        <div class="stats-grid" id="addr-stats"></div>
+      </div>
+
+      <div class="section">
+        <div id="addr-results">
+          <div class="empty">Enter wallet addresses above and click Search</div>
+        </div>
+      </div>
+
+      <div id="addr-pagination" style="display:none;margin-top:12px;display:flex;gap:8px;justify-content:center">
+        <button class="btn btn-sm btn-outline" id="addr-prev" onclick="addrPagePrev()">← Prev</button>
+        <span id="addr-page-info" style="color:#8b949e;font-size:12px;line-height:28px"></span>
+        <button class="btn btn-sm btn-outline" id="addr-next" onclick="addrPageNext()">Next →</button>
+      </div>
+    HTML
   end
 
   def h(str)
