@@ -13,5 +13,8 @@ Rails.application.routes.draw do
     end
   end
 
+  # Dashboard
+  root "dashboard#index"
+
   get "health", to: proc { [200, {}, ["ok"]] }
 end
