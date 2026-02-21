@@ -6,8 +6,8 @@ gem "rails", "~> 8.0"
 gem "pg", "~> 1.5"
 gem "puma", "~> 6.0"
 
-# Temporal (official SDK)
-gem "temporalio", "~> 0.4"
+# Temporal (official SDK - https://github.com/temporalio/sdk-ruby)
+gem "temporalio", "~> 1.3"
 
 # Ethereum
 gem "eth", "~> 0.5"

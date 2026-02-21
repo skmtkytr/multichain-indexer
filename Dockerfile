@@ -6,12 +6,19 @@ RUN apt-get update -qq && \
     libpq-dev \
     git \
     curl \
+    pkg-config \
+    autoconf \
+    automake \
+    libtool \
+    libyaml-dev \
     && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
 
-COPY Gemfile Gemfile.lock ./
-RUN bundle install
+COPY Gemfile ./
+
+# Generate a fresh lockfile for this platform and install
+RUN bundle lock && bundle install --jobs 4
 
 COPY . .
 

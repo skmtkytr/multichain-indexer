@@ -4,7 +4,19 @@ require "temporalio/worker"
 
 Rails.logger.info "Starting Temporal worker..."
 
-client = TemporalClient.connection
+# Retry connection to Temporal server with backoff
+client = nil
+5.times do |i|
+  client = TemporalClient.connection
+  break
+rescue => e
+  wait = (i + 1) * 5
+  Rails.logger.warn "Failed to connect to Temporal (attempt #{i + 1}/5): #{e.message}. Retrying in #{wait}s..."
+  TemporalClient.reset!
+  sleep wait
+end
+
+raise "Could not connect to Temporal after 5 attempts" if client.nil?
 
 worker = Temporalio::Worker.new(
   client: client,
@@ -21,4 +33,5 @@ worker = Temporalio::Worker.new(
   ]
 )
 
+Rails.logger.info "Temporal worker connected and running on task queue: #{ENV.fetch('TEMPORAL_TASK_QUEUE', 'evm-indexer')}"
 worker.run(shutdown_signals: %w[SIGINT SIGTERM])
