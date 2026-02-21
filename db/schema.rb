@@ -10,9 +10,26 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.1].define(version: 2026_02_21_000004) do
+ActiveRecord::Schema[8.1].define(version: 2026_02_21_000005) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "pg_catalog.plpgsql"
+
+  create_table "chain_configs", force: :cascade do |t|
+    t.integer "block_time_ms", default: 12000
+    t.integer "blocks_per_batch", default: 10
+    t.integer "chain_id", null: false
+    t.datetime "created_at", null: false
+    t.boolean "enabled", default: true
+    t.string "explorer_url"
+    t.integer "max_rpc_batch_size", default: 100
+    t.string "name", null: false
+    t.string "native_currency", default: "ETH"
+    t.integer "poll_interval_seconds", default: 2
+    t.string "rpc_url", null: false
+    t.string "rpc_url_fallback"
+    t.datetime "updated_at", null: false
+    t.index ["chain_id"], name: "index_chain_configs_on_chain_id", unique: true
+  end
 
   create_table "indexed_blocks", force: :cascade do |t|
     t.bigint "base_fee_per_gas"

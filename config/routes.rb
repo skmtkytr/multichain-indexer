@@ -6,6 +6,11 @@ Rails.application.routes.draw do
       resources :logs, only: [:index]
       resources :contracts, only: [:index, :show], param: :address
 
+      # Chain management
+      resources :chains, only: [:index, :show, :create, :update, :destroy], param: :chain_id do
+        post :test, on: :member
+      end
+
       # Indexer control
       post "indexer/start", to: "indexer#start"
       post "indexer/stop", to: "indexer#stop"

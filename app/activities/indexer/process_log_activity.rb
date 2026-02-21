@@ -6,7 +6,7 @@ module Indexer
       chain_id = params["chain_id"]
       block_number = params["block_number"]
 
-      rpc = EthereumRpc.new
+      rpc = EthereumRpc.new(chain_id: chain_id)
       logs = rpc.get_logs(from_block: block_number, to_block: block_number)
 
       return if logs.nil? || logs.empty?

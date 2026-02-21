@@ -6,7 +6,7 @@ module Indexer
       chain_id = params["chain_id"]
       tx_data = params["tx_data"]
 
-      rpc = EthereumRpc.new
+      rpc = EthereumRpc.new(chain_id: chain_id)
       receipt = rpc.get_transaction_receipt(tx_data["hash"])
 
       IndexedTransaction.upsert(

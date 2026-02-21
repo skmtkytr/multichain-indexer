@@ -8,11 +8,11 @@ module Indexer
 
       case action
       when "get_latest"
-        rpc = EthereumRpc.new
+        rpc = EthereumRpc.new(chain_id: chain_id)
         rpc.get_block_number
       when "fetch_block"
         block_number = params["block_number"]
-        rpc = EthereumRpc.new
+        rpc = EthereumRpc.new(chain_id: chain_id)
         block_data = rpc.get_block_by_number(block_number, full_transactions: true)
 
         if block_data.nil?

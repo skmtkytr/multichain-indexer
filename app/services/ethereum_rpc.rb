@@ -4,8 +4,15 @@ require "json"
 class EthereumRpc
   class RpcError < StandardError; end
 
-  def initialize(rpc_url: nil)
-    @rpc_url = rpc_url || ENV.fetch("ETHEREUM_RPC_URL")
+  def initialize(rpc_url: nil, chain_id: nil)
+    @rpc_url = if rpc_url
+                 rpc_url
+               elsif chain_id
+                 config = ChainConfig.find_by(chain_id: chain_id)
+                 config&.active_rpc_url || ENV.fetch("ETHEREUM_RPC_URL")
+               else
+                 ENV.fetch("ETHEREUM_RPC_URL")
+               end
     @uri = URI(@rpc_url)
     @request_id = 0
   end

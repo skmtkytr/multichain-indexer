@@ -5,22 +5,29 @@ module Api
         chain_id = params.fetch(:chain_id, 1).to_i
         start_block = params[:start_block]
 
+        chain_config = ChainConfig.find_by(chain_id: chain_id)
+        return render json: { error: "Chain #{chain_id} not configured. Add it first." }, status: :not_found unless chain_config
+        return render json: { error: "Chain #{chain_id} is disabled" }, status: :unprocessable_entity unless chain_config.enabled?
+
         cursor = IndexerCursor.find_or_create_by!(chain_id: chain_id)
         return render json: { error: "Already running" }, status: :conflict if cursor.running?
 
         # Determine start block
+        rpc = EthereumRpc.new(chain_id: chain_id)
         if start_block.present?
-          from_block = start_block == "latest" ? EthereumRpc.new.get_block_number : start_block.to_i
+          from_block = start_block == "latest" ? rpc.get_block_number : start_block.to_i
         else
-          from_block = cursor.last_indexed_block.positive? ? cursor.last_indexed_block + 1 : EthereumRpc.new.get_block_number
+          from_block = cursor.last_indexed_block.positive? ? cursor.last_indexed_block + 1 : rpc.get_block_number
         end
 
-        # Start Temporal workflow
+        # Start Temporal workflow with chain-specific settings
         handle = TemporalClient.connection.start_workflow(
           Indexer::BlockPollerWorkflow,
           {
             "chain_id" => chain_id,
-            "start_block" => from_block
+            "start_block" => from_block,
+            "poll_interval_seconds" => chain_config.poll_interval_seconds,
+            "blocks_per_batch" => chain_config.blocks_per_batch
           },
           id: "evm-indexer-chain-#{chain_id}",
           task_queue: ENV.fetch("TEMPORAL_TASK_QUEUE", "evm-indexer")
