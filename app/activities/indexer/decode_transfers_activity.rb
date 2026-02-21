@@ -16,6 +16,8 @@ module Indexer
       case action
       when 'decode_and_store'
         decode_and_store(params)
+      when 'store_internal_transfers'
+        store_internal_transfers(params)
       when 'enqueue_token_metadata'
         enqueue_token_metadata(params)
       when 'fetch_token_metadata'
@@ -114,6 +116,42 @@ module Indexer
       )
 
       { transfers_count: transfers.size, token_addresses: token_addresses }
+    end
+
+    # Store only internal transfers from traces (called separately from main fetch_and_store)
+    def store_internal_transfers(params)
+      chain_id = params['chain_id']
+      block_number = params['block_number']
+      traces = params['traces'] || []
+
+      transfers = []
+      traces.each_with_index do |trace, idx|
+        value = parse_trace_value(trace)
+        next if value.zero?
+
+        transfers << {
+          tx_hash: extract_trace_tx_hash(trace),
+          block_number: block_number,
+          chain_id: chain_id,
+          transfer_type: 'internal',
+          token_address: nil,
+          from_address: extract_trace_from(trace)&.downcase,
+          to_address: extract_trace_to(trace)&.downcase,
+          amount: value.to_s,
+          token_id: nil,
+          log_index: -1,
+          trace_index: idx,
+          created_at: Time.current,
+          updated_at: Time.current
+        }
+      end
+
+      if transfers.any?
+        AssetTransfer.upsert_all(transfers, unique_by: %i[chain_id tx_hash transfer_type log_index trace_index])
+      end
+
+      Rails.logger.info("Stored #{transfers.size} internal transfers for block ##{block_number} on chain #{chain_id}")
+      { internal_count: transfers.size }
     end
 
     def fetch_token_metadata(params)

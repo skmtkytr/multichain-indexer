@@ -3,8 +3,9 @@
 require 'temporalio/workflow'
 
 module Indexer
-  # Processes a single block: fetches all data (block + receipts + logs), then stores.
-  # Only 2 activities: fetch (RPC) → store (DB), minimizing RPC calls.
+  # Processes a single block: fetches data from RPC and stores to DB in one activity.
+  # All heavy data stays inside the activity — only a small summary returns through Temporal gRPC.
+  # This avoids the 4MB gRPC payload limit that Polygon/Arbitrum blocks can exceed.
   class BlockProcessorWorkflow < Temporalio::Workflow::Definition
     ACTIVITY_TIMEOUT = 120
 
@@ -18,33 +19,21 @@ module Indexer
         backoff_coefficient: 2.0
       )
 
-      # 1. Fetch block + receipts + logs in minimal RPC calls
-      full_data = Temporalio::Workflow.execute_activity(
+      # 1. Fetch from RPC + store to DB + decode transfers — all in one activity
+      #    Returns only a tiny summary (~200 bytes), never exceeds gRPC limit.
+      result = Temporalio::Workflow.execute_activity(
         Indexer::FetchBlockActivity,
-        { 'action' => 'fetch_full_block', 'chain_id' => chain_id, 'block_number' => block_number },
+        { 'action' => 'fetch_and_store', 'chain_id' => chain_id, 'block_number' => block_number },
         schedule_to_close_timeout: ACTIVITY_TIMEOUT,
         retry_policy: retry_policy
       )
 
-      return if full_data.nil?
+      return if result.nil?
 
-      # 2. Process and store everything in one DB transaction
-      Temporalio::Workflow.execute_activity(
-        Indexer::ProcessBlockActivity,
-        {
-          'action' => 'process_full',
-          'block_data' => full_data['block'],
-          'receipts' => full_data['receipts'],
-          'logs' => full_data['logs']
-        },
-        schedule_to_close_timeout: ACTIVITY_TIMEOUT,
-        retry_policy: retry_policy
-      )
-
-      # 3. Fetch traces for internal transactions (best-effort)
+      # 2. Fetch traces for internal transactions (best-effort, optional)
       block_number_hex = "0x#{block_number.to_s(16)}"
-      trace_data = begin
-        Temporalio::Workflow.execute_activity(
+      begin
+        trace_result = Temporalio::Workflow.execute_activity(
           Indexer::FetchTracesActivity,
           {
             'chain_id' => chain_id,
@@ -53,45 +42,26 @@ module Indexer
           schedule_to_close_timeout: ACTIVITY_TIMEOUT,
           retry_policy: Temporalio::RetryPolicy.new(max_attempts: 2)
         )
-      rescue => e
-        Temporalio::Workflow.logger.warn("Trace fetch failed (non-fatal): #{e.message}")
-        { 'traces' => [], 'supported' => false }
-      end
 
-      # 4. Decode and store asset transfers
-      decode_result = Temporalio::Workflow.execute_activity(
-        Indexer::DecodeTransfersActivity,
-        {
-          'action' => 'decode_and_store',
-          'chain_id' => chain_id,
-          'block_number' => block_number,
-          'transactions' => full_data['block']['transactions'] || [],
-          'logs' => full_data['logs'] || [],
-          'traces' => trace_data['traces'] || []
-        },
-        schedule_to_close_timeout: ACTIVITY_TIMEOUT,
-        retry_policy: retry_policy
-      )
-
-      # 5. Queue unknown token addresses for async metadata fetch (DB only, no RPC)
-      if decode_result && decode_result['token_addresses']&.any?
-        begin
+        # Store internal transfers from traces if any
+        if trace_result && trace_result['traces']&.any?
           Temporalio::Workflow.execute_activity(
             Indexer::DecodeTransfersActivity,
             {
-              'action' => 'enqueue_token_metadata',
+              'action' => 'store_internal_transfers',
               'chain_id' => chain_id,
-              'token_addresses' => decode_result['token_addresses']
+              'block_number' => block_number,
+              'traces' => trace_result['traces']
             },
-            schedule_to_close_timeout: 10,
-            retry_policy: Temporalio::RetryPolicy.new(max_attempts: 1)
+            schedule_to_close_timeout: ACTIVITY_TIMEOUT,
+            retry_policy: retry_policy
           )
-        rescue => e
-          Temporalio::Workflow.logger.warn("Token enqueue failed (non-fatal): #{e.message}")
         end
+      rescue => e
+        Temporalio::Workflow.logger.warn("Trace fetch failed (non-fatal): #{e.message}")
       end
 
-      # 6. Update cursor
+      # 3. Update cursor
       Temporalio::Workflow.execute_activity(
         Indexer::ProcessBlockActivity,
         { 'action' => 'update_cursor', 'chain_id' => chain_id, 'block_number' => block_number },
