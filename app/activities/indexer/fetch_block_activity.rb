@@ -133,7 +133,7 @@ module Indexer
       end
 
       # 4. Decode asset transfers (in-process, no Temporal roundtrip)
-      transfers = decode_transfers(chain_id, block_num, block_data['transactions'] || [], logs)
+      transfers = decode_transfers(chain_id, block_num, block_data['transactions'] || [], logs, block_data['withdrawals'] || [])
       token_addresses = transfers[:token_addresses]
 
       # 5. Enqueue token metadata placeholders
@@ -165,13 +165,31 @@ module Indexer
     end
 
     # Decode transfers inline (same logic as DecodeTransfersActivity but without Temporal overhead)
-    def decode_transfers(chain_id, block_number, transactions, logs)
+    def decode_transfers(chain_id, block_number, transactions, logs, withdrawals = [])
       transfer_topic = '0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef'
       erc1155_single = '0xc3d58168c5ae7397731d063d5bbf3d657854427343f4c083240f7aacaa2d0f62'
       weth_deposit = '0xe1fffcc4923d04b559f4d29a8bfc6cda04eb5b0d3c460751c2402c5c5cc9109c'
       weth_withdrawal = '0x7fcf532c15f0a6db0bd6d0e038bea71d30d808c7d98cb3bf7268a95bf5081b65'
 
       transfers = []
+
+      # Beacon chain validator withdrawals (Shanghai/Capella upgrade, amount in Gwei)
+      withdrawals.each_with_index do |w, idx|
+        amount_gwei = w['amount'].to_i(16)
+        amount_wei = amount_gwei * 1_000_000_000 # Gwei → Wei
+        next if amount_wei.zero?
+
+        transfers << {
+          tx_hash: "withdrawal-#{block_number}-#{w['index'].to_i(16)}",
+          block_number: block_number, chain_id: chain_id,
+          transfer_type: 'withdrawal', token_address: nil,
+          from_address: '0x0000000000000000000000000000000000000000',
+          to_address: w['address']&.downcase,
+          amount: amount_wei.to_s, token_id: nil,
+          log_index: -1, trace_index: idx,
+          created_at: Time.current, updated_at: Time.current
+        }
+      end
 
       # Native ETH
       transactions.each do |tx|

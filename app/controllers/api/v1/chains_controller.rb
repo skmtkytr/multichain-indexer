@@ -5,7 +5,7 @@ module Api
     class ChainsController < ApplicationController
       def index
         chains = ChainConfig.order(:chain_id).map do |c|
-          chain_json(c)
+          chain_json(c, mask: true)
         end
         render json: chains
       end
@@ -83,7 +83,7 @@ module Api
 
       def chain_params
         permitted = params.permit(
-          :chain_id, :name, :rpc_url,
+          :chain_id, :name, :rpc_url, :chain_type,
           :explorer_url, :native_currency, :block_time_ms,
           :poll_interval_seconds, :blocks_per_batch,
           :max_rpc_batch_size, :enabled, :network_type
@@ -97,14 +97,15 @@ module Api
         permitted
       end
 
-      def chain_json(chain)
+      def chain_json(chain, mask: false)
         {
           chain_id: chain.chain_id,
           name: chain.name,
+          chain_type: chain.chain_type,
           network_type: chain.network_type,
-          rpc_url: mask_url(chain.rpc_url),
+          rpc_url: mask ? mask_url(chain.rpc_url) : chain.rpc_url,
           rpc_endpoints: (chain.rpc_endpoints || []).map do |ep|
-            { url: mask_url(ep["url"]), label: ep["label"], priority: ep["priority"] }
+            { url: mask ? mask_url(ep["url"]) : ep["url"], label: ep["label"], priority: ep["priority"] }
           end,
           explorer_url: chain.explorer_url,
           native_currency: chain.native_currency,

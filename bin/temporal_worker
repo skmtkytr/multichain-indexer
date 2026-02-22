@@ -29,7 +29,8 @@ worker = Temporalio::Worker.new(
   task_queue: ENV.fetch('TEMPORAL_TASK_QUEUE', 'evm-indexer'),
   workflows: [
     Indexer::BlockPollerWorkflow,
-    Indexer::BlockProcessorWorkflow
+    Indexer::BlockProcessorWorkflow,
+    Indexer::UtxoBlockProcessorWorkflow
   ],
   activities: [
     Indexer::FetchBlockActivity,
@@ -37,7 +38,8 @@ worker = Temporalio::Worker.new(
     Indexer::ProcessTransactionActivity,
     Indexer::ProcessLogActivity,
     Indexer::DecodeTransfersActivity,
-    Indexer::FetchTracesActivity
+    Indexer::FetchTracesActivity,
+    Indexer::UtxoFetchBlockActivity
   ]
 )
 

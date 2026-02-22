@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.1].define(version: 2026_02_22_000001) do
+ActiveRecord::Schema[8.1].define(version: 2026_02_22_100003) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "pg_catalog.plpgsql"
 
@@ -18,9 +18,11 @@ ActiveRecord::Schema[8.1].define(version: 2026_02_22_000001) do
     t.decimal "amount", precision: 78, null: false
     t.integer "block_number", null: false
     t.integer "chain_id", null: false
+    t.boolean "confidential", default: false
     t.datetime "created_at", null: false
     t.string "from_address", limit: 42
     t.integer "log_index", default: -1
+    t.string "privacy_protocol"
     t.string "to_address", limit: 42
     t.string "token_address", limit: 42
     t.decimal "token_id", precision: 78
@@ -40,6 +42,7 @@ ActiveRecord::Schema[8.1].define(version: 2026_02_22_000001) do
     t.integer "block_time_ms", default: 12000
     t.integer "blocks_per_batch", default: 10
     t.integer "chain_id", null: false
+    t.string "chain_type", default: "evm", null: false
     t.datetime "created_at", null: false
     t.boolean "enabled", default: true
     t.string "explorer_url"
@@ -49,7 +52,7 @@ ActiveRecord::Schema[8.1].define(version: 2026_02_22_000001) do
     t.string "network_type", default: "mainnet", null: false
     t.integer "poll_interval_seconds", default: 2
     t.jsonb "rpc_endpoints", default: []
-    t.string "rpc_url", null: false
+    t.string "rpc_url"
     t.string "rpc_url_fallback"
     t.boolean "supports_block_receipts", default: true, null: false
     t.boolean "supports_trace", default: false
@@ -154,5 +157,61 @@ ActiveRecord::Schema[8.1].define(version: 2026_02_22_000001) do
     t.decimal "total_supply", precision: 78
     t.datetime "updated_at", null: false
     t.index ["chain_id", "address"], name: "index_token_contracts_on_chain_id_and_address", unique: true
+  end
+
+  create_table "utxo_inputs", force: :cascade do |t|
+    t.string "address"
+    t.decimal "amount", precision: 30
+    t.integer "chain_id", null: false
+    t.datetime "created_at", null: false
+    t.boolean "is_coinbase", default: false
+    t.string "prev_txid", limit: 64
+    t.integer "prev_vout"
+    t.text "script_sig"
+    t.bigint "sequence"
+    t.string "txid", limit: 64, null: false
+    t.datetime "updated_at", null: false
+    t.integer "vin_index", null: false
+    t.jsonb "witness", default: []
+    t.index ["address"], name: "index_utxo_inputs_on_address"
+    t.index ["chain_id", "prev_txid", "prev_vout"], name: "idx_utxo_inputs_prev_output"
+    t.index ["chain_id", "txid", "vin_index"], name: "index_utxo_inputs_on_chain_id_and_txid_and_vin_index", unique: true
+  end
+
+  create_table "utxo_outputs", force: :cascade do |t|
+    t.string "address"
+    t.decimal "amount", precision: 30, null: false
+    t.integer "chain_id", null: false
+    t.datetime "created_at", null: false
+    t.boolean "is_confidential", default: false
+    t.text "script_pub_key"
+    t.string "script_type"
+    t.boolean "spent", default: false
+    t.string "spent_by_txid", limit: 64
+    t.integer "spent_by_vin"
+    t.string "txid", limit: 64, null: false
+    t.datetime "updated_at", null: false
+    t.integer "vout_index", null: false
+    t.index ["address"], name: "index_utxo_outputs_on_address"
+    t.index ["chain_id", "spent"], name: "idx_utxo_outputs_unspent", where: "(spent = false)"
+    t.index ["chain_id", "txid", "vout_index"], name: "index_utxo_outputs_on_chain_id_and_txid_and_vout_index", unique: true
+  end
+
+  create_table "utxo_transactions", force: :cascade do |t|
+    t.string "block_hash", limit: 64
+    t.bigint "block_number", null: false
+    t.integer "chain_id", null: false
+    t.datetime "created_at", null: false
+    t.decimal "fee", precision: 30
+    t.integer "input_count", default: 0
+    t.boolean "is_coinbase", default: false
+    t.bigint "lock_time"
+    t.integer "output_count", default: 0
+    t.integer "size"
+    t.string "txid", limit: 64, null: false
+    t.datetime "updated_at", null: false
+    t.integer "vsize"
+    t.index ["chain_id", "block_number"], name: "index_utxo_transactions_on_chain_id_and_block_number"
+    t.index ["chain_id", "txid"], name: "index_utxo_transactions_on_chain_id_and_txid", unique: true
   end
 end

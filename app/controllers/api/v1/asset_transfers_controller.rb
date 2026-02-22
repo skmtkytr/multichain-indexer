@@ -25,7 +25,7 @@ module Api
 
       def transfer_json(t)
         token = t.token_contract
-        native = t.native? || t.internal?
+        native = t.native? || t.internal? || t.withdrawal?
         {
           id: t.id,
           tx_hash: t.tx_hash,

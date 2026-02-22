@@ -60,7 +60,7 @@ module Api
                     end
 
         token = t.token_contract
-        native = t.native? || t.internal?
+        native = t.native? || t.internal? || t.withdrawal?
         decimals = native ? 18 : token&.decimals
         native_symbol = chain_native_symbol(t.chain_id)
 

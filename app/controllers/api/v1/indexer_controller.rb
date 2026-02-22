@@ -20,12 +20,15 @@ module Api
         cursor = IndexerCursor.find_or_create_by!(chain_id: chain_id)
         return render json: { error: 'Already running' }, status: :conflict if cursor.running?
 
-        # Determine start block
-        rpc = EthereumRpc.new(chain_id: chain_id)
+        # Determine start block using the appropriate RPC client
+        is_utxo = chain_config.chain_type == 'utxo'
+        rpc = is_utxo ? BitcoinRpc.new(chain_id: chain_id) : EthereumRpc.new(chain_id: chain_id)
+        latest_block = is_utxo ? rpc.get_block_count : rpc.get_block_number
+
         from_block = if start_block.present?
-                       start_block == 'latest' ? rpc.get_block_number : start_block.to_i
+                       start_block == 'latest' ? latest_block : start_block.to_i
                      else
-                       cursor.last_indexed_block.positive? ? cursor.last_indexed_block + 1 : rpc.get_block_number
+                       cursor.last_indexed_block.positive? ? cursor.last_indexed_block + 1 : latest_block
                      end
 
         # Start Temporal workflow with chain-specific settings
@@ -33,6 +36,7 @@ module Api
           Indexer::BlockPollerWorkflow,
           {
             'chain_id' => chain_id,
+            'chain_type' => chain_config.chain_type,
             'start_block' => from_block,
             'poll_interval_seconds' => chain_config.poll_interval_seconds,
             'blocks_per_batch' => chain_config.blocks_per_batch

@@ -18,11 +18,11 @@ class DashboardController < ApplicationController
       status: @cursor&.status || 'not_initialized',
       last_indexed_block: @cursor&.last_indexed_block || 0,
       error: @cursor&.error_message,
-      blocks_count: IndexedBlock.by_chain(chain_id).count,
-      transactions_count: IndexedTransaction.by_chain(chain_id).count,
-      logs_count: IndexedLog.by_chain(chain_id).count,
-      transfers_count: AssetTransfer.by_chain(chain_id).count,
-      tokens_count: TokenContract.by_chain(chain_id).count
+      blocks_count: fast_count('indexed_blocks', chain_id),
+      transactions_count: fast_count('indexed_transactions', chain_id),
+      logs_count: fast_count('indexed_logs', chain_id),
+      transfers_count: fast_count('asset_transfers', chain_id),
+      tokens_count: fast_count('token_contracts', chain_id)
     }
 
     @page = params.fetch(:page, 'overview')
@@ -31,6 +31,17 @@ class DashboardController < ApplicationController
   end
 
   private
+
+  # Use partial index scan or estimated count for large tables
+  def fast_count(table_name, chain_id)
+    sql = "SELECT count_estimate('SELECT 1 FROM #{table_name} WHERE chain_id = #{chain_id.to_i}')"
+    ActiveRecord::Base.connection.execute(sql).first['count_estimate'].to_i
+  rescue ActiveRecord::StatementInvalid
+    # Fallback: use pg_stat estimate if function doesn't exist
+    ActiveRecord::Base.connection.execute(
+      "SELECT COUNT(*) AS cnt FROM #{table_name} WHERE chain_id = #{chain_id.to_i}"
+    ).first['cnt'].to_i
+  end
 
   def build_html
     <<~HTML
@@ -405,6 +416,21 @@ class DashboardController < ApplicationController
   def javascript
     <<~JS
       const chainId = #{@stats[:chain_id]};
+      const chainExplorers = {#{@chain_configs.map { |c| c.explorer_url.present? ? "#{c.chain_id}:'#{c.explorer_url.chomp('/')}'" : nil }.compact.join(',')}};
+      function getExplorer(cid) { return chainExplorers[cid || chainId] || null; }
+
+      // Convert UTC timestamps to local time
+      function initLocalTimes() {
+        document.querySelectorAll('.local-time[data-ts]').forEach(el => {
+          const ts = parseInt(el.dataset.ts, 10);
+          if (!isNaN(ts)) {
+            const d = new Date(ts * 1000);
+            el.textContent = d.toLocaleString(undefined, {year:'numeric',month:'2-digit',day:'2-digit',hour:'2-digit',minute:'2-digit',second:'2-digit'});
+            el.title = d.toISOString();
+          }
+        });
+      }
+      document.addEventListener('DOMContentLoaded', initLocalTimes);
 
       // Indexer controls
       async function controlIndexer(action) {
@@ -647,8 +673,9 @@ class DashboardController < ApplicationController
         let inCount = 0, outCount = 0, selfCount = 0;
         let inNative = 0n, outNative = 0n;
         transfers.forEach(t => {
-          if (t.direction === 'in') { inCount++; if (t.transfer_type === 'native') inNative += BigInt(t.amount); }
-          else if (t.direction === 'out') { outCount++; if (t.transfer_type === 'native') outNative += BigInt(t.amount); }
+          const isEth = (t.transfer_type === 'native' || t.transfer_type === 'withdrawal' || t.transfer_type === 'internal');
+          if (t.direction === 'in') { inCount++; if (isEth) inNative += BigInt(t.amount); }
+          else if (t.direction === 'out') { outCount++; if (isEth) outNative += BigInt(t.amount); }
           else { selfCount++; }
         });
 
@@ -669,13 +696,13 @@ class DashboardController < ApplicationController
         }
 
         const addrSet = new Set(addrs);
-        const explorer = #{@explorer ? "'#{@explorer}'" : 'null'};
+        const explorer = getExplorer(chainId);
 
         let rows = '';
         transfers.forEach(t => {
           const dirClass = t.direction === 'in' ? 'dir-in' : t.direction === 'out' ? 'dir-out' : 'dir-self';
           const dirLabel = t.direction === 'in' ? '↓ IN' : t.direction === 'out' ? '↑ OUT' : '↔ SELF';
-          const typeBadge = {native:'<span style="color:#3fb950">ETH</span>',erc20:'<span style="color:#58a6ff">ERC20</span>',erc721:'<span style="color:#d2a8ff">NFT</span>',erc1155:'<span style="color:#d29922">1155</span>',internal:'<span style="color:#f79000">INT</span>'}[t.transfer_type] || t.transfer_type;
+          const typeBadge = {native:'<span style="color:#3fb950">ETH</span>',erc20:'<span style="color:#58a6ff">ERC20</span>',erc721:'<span style="color:#d2a8ff">NFT</span>',erc1155:'<span style="color:#d29922">1155</span>',internal:'<span style="color:#f79000">INT</span>',withdrawal:'<span style="color:#da70d6">WD</span>'}[t.transfer_type] || t.transfer_type;
 
           const txLink = explorer ? '<a href="' + explorer + '/tx/' + t.tx_hash + '" target="_blank" class="hash">' + t.tx_hash.slice(0,10) + '...' + '</a>' : '<span class="hash">' + t.tx_hash.slice(0,10) + '...</span>';
 
@@ -765,7 +792,7 @@ class DashboardController < ApplicationController
 
     rows = @blocks.map do |b|
       "<tr><td>#{link_block(b.number)}</td><td>#{link_block_hash(b.block_hash,
-                                                                 b.number)}</td><td>#{Time.at(b.timestamp).utc.strftime('%Y-%m-%d %H:%M:%S')}</td><td>#{link_address(b.miner)}</td><td class=\"num\">#{b.transaction_count}</td><td class=\"num\">#{format_number(b.gas_used)}</td></tr>"
+                                                                 b.number)}</td><td><span class=\"local-time\" data-ts=\"#{b.timestamp}\"></span></td><td>#{link_address(b.miner)}</td><td class=\"num\">#{b.transaction_count}</td><td class=\"num\">#{format_number(b.gas_used)}</td></tr>"
     end.join
     "<table><thead><tr><th>Block</th><th>Hash</th><th>Timestamp</th><th>Miner</th><th>Txns</th><th>Gas</th></tr></thead><tbody>#{rows}</tbody></table>"
   end
@@ -889,7 +916,7 @@ class DashboardController < ApplicationController
 
     rows = @asset_transfers.map do |transfer|
       token_info = case transfer.transfer_type
-                   when 'native', 'internal'
+                   when 'native', 'internal', 'withdrawal'
                      "<span class=\"num\">#{transfer.token_symbol}</span>"
                    else
                      token_name = transfer.token_contract&.display_name || 'Unknown'
@@ -907,10 +934,12 @@ class DashboardController < ApplicationController
                    when 'erc721' then '<span style="color:#d2a8ff">ERC721</span>'
                    when 'erc1155' then '<span style="color:#d29922">ERC1155</span>'
                    when 'internal' then '<span style="color:#f79000">Internal</span>'
+                   when 'withdrawal' then '<span style="color:#da70d6">Withdrawal</span>'
                    else transfer.transfer_type.upcase
                    end
 
-      "<tr><td>#{link_tx(transfer.tx_hash)}</td><td>#{link_block(transfer.block_number)}</td><td>#{type_badge}</td><td>#{token_info}</td><td>#{link_address(transfer.from_address)}</td><td>#{link_address(transfer.to_address)}</td><td class=\"num\">#{h amount_display}</td></tr>"
+      tx_display = transfer.tx_hash&.start_with?('withdrawal-') ? "<span class=\"hash\">#{h transfer.tx_hash[0..20]}...</span>" : link_tx(transfer.tx_hash)
+      "<tr><td>#{tx_display}</td><td>#{link_block(transfer.block_number)}</td><td>#{type_badge}</td><td>#{token_info}</td><td>#{link_address(transfer.from_address)}</td><td>#{link_address(transfer.to_address)}</td><td class=\"num\">#{h amount_display}</td></tr>"
     end.join
     "<table><thead><tr><th>Tx Hash</th><th>Block</th><th>Type</th><th>Token</th><th>From</th><th>To</th><th>Amount</th></tr></thead><tbody>#{rows}</tbody></table>"
   end
@@ -974,6 +1003,7 @@ class DashboardController < ApplicationController
               <option value="erc721">ERC-721</option>
               <option value="erc1155">ERC-1155</option>
               <option value="internal">Internal</option>
+              <option value="withdrawal">Withdrawal</option>
             </select>
           </div>
           <div class="form-group">

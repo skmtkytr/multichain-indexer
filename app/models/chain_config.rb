@@ -4,10 +4,13 @@ class ChainConfig < ApplicationRecord
   has_one :indexer_cursor, primary_key: :chain_id, foreign_key: :chain_id
 
   NETWORK_TYPES = %w[mainnet testnet devnet].freeze
+  CHAIN_TYPES = %w[evm utxo].freeze
 
   validates :chain_id, presence: true, uniqueness: true
-  validates :name, :rpc_url, presence: true
+  validates :name, presence: true
+  validates :rpc_url, presence: true, if: -> { evm? && rpc_endpoints.blank? }
   validates :network_type, inclusion: { in: NETWORK_TYPES }
+  validates :chain_type, inclusion: { in: CHAIN_TYPES }
   validates :poll_interval_seconds, numericality: { greater_than: 0 }
   validates :blocks_per_batch, numericality: { greater_than: 0, less_than_or_equal_to: 100 }
   validates :trace_method, inclusion: { in: %w[debug_traceBlock trace_block], allow_blank: true }
@@ -42,11 +45,26 @@ class ChainConfig < ApplicationRecord
 
   # Default chain configs with public RPCs
   DEFAULTS = {
-    1 => { name: "Ethereum", rpc_url: "https://eth.llamarpc.com", explorer_url: "https://etherscan.io", native_currency: "ETH", block_time_ms: 12_000, network_type: "mainnet" },
-    10 => { name: "Optimism", rpc_url: "https://mainnet.optimism.io", explorer_url: "https://optimistic.etherscan.io", native_currency: "ETH", block_time_ms: 2000, network_type: "mainnet" },
-    137 => { name: "Polygon", rpc_url: "https://polygon-bor-rpc.publicnode.com", explorer_url: "https://polygonscan.com", native_currency: "MATIC", block_time_ms: 2000, network_type: "mainnet" },
-    8453 => { name: "Base", rpc_url: "https://mainnet.base.org", explorer_url: "https://basescan.org", native_currency: "ETH", block_time_ms: 2000, network_type: "mainnet" },
-    42161 => { name: "Arbitrum", rpc_url: "https://arb1.arbitrum.io/rpc", explorer_url: "https://arbiscan.io", native_currency: "ETH", block_time_ms: 250, network_type: "mainnet" },
-    11155111 => { name: "Sepolia", rpc_url: "https://ethereum-sepolia-rpc.publicnode.com", explorer_url: "https://sepolia.etherscan.io", native_currency: "ETH", block_time_ms: 12_000, network_type: "testnet" }
+    # EVM chains
+    1 => { name: "Ethereum", rpc_url: "https://eth.llamarpc.com", explorer_url: "https://etherscan.io", native_currency: "ETH", block_time_ms: 12_000, network_type: "mainnet", chain_type: "evm" },
+    10 => { name: "Optimism", rpc_url: "https://mainnet.optimism.io", explorer_url: "https://optimistic.etherscan.io", native_currency: "ETH", block_time_ms: 2000, network_type: "mainnet", chain_type: "evm" },
+    137 => { name: "Polygon", rpc_url: "https://polygon-bor-rpc.publicnode.com", explorer_url: "https://polygonscan.com", native_currency: "MATIC", block_time_ms: 2000, network_type: "mainnet", chain_type: "evm" },
+    8453 => { name: "Base", rpc_url: "https://mainnet.base.org", explorer_url: "https://basescan.org", native_currency: "ETH", block_time_ms: 2000, network_type: "mainnet", chain_type: "evm" },
+    42161 => { name: "Arbitrum", rpc_url: "https://arb1.arbitrum.io/rpc", explorer_url: "https://arbiscan.io", native_currency: "ETH", block_time_ms: 250, network_type: "mainnet", chain_type: "evm" },
+    11155111 => { name: "Sepolia", rpc_url: "https://ethereum-sepolia-rpc.publicnode.com", explorer_url: "https://sepolia.etherscan.io", native_currency: "ETH", block_time_ms: 12_000, network_type: "testnet", chain_type: "evm" },
+    # UTXO chains — use chain_id as BIP44 coin_type convention (non-EVM)
+    # These need RPC endpoints configured manually (self-hosted node or provider)
+    800_000_000 => { name: "Bitcoin", rpc_url: nil, explorer_url: "https://mempool.space", native_currency: "BTC", block_time_ms: 600_000, network_type: "mainnet", chain_type: "utxo", enabled: false, poll_interval_seconds: 30, blocks_per_batch: 1 },
+    800_000_002 => { name: "Litecoin", rpc_url: nil, explorer_url: "https://litecoinspace.org", native_currency: "LTC", block_time_ms: 150_000, network_type: "mainnet", chain_type: "utxo", enabled: false, poll_interval_seconds: 15, blocks_per_batch: 5 },
+    800_000_003 => { name: "Dogecoin", rpc_url: nil, explorer_url: "https://dogechain.info", native_currency: "DOGE", block_time_ms: 60_000, network_type: "mainnet", chain_type: "utxo", enabled: false, poll_interval_seconds: 10, blocks_per_batch: 5 },
+    800_000_145 => { name: "Bitcoin Cash", rpc_url: nil, explorer_url: "https://blockchair.com/bitcoin-cash", native_currency: "BCH", block_time_ms: 600_000, network_type: "mainnet", chain_type: "utxo", enabled: false, poll_interval_seconds: 30, blocks_per_batch: 1 }
   }.freeze
+
+  def evm?
+    chain_type == 'evm'
+  end
+
+  def utxo?
+    chain_type == 'utxo'
+  end
 end

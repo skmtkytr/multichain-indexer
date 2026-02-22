@@ -16,19 +16,31 @@ module Indexer
       poll_interval = params['poll_interval_seconds'] || params[:poll_interval_seconds] || 2
       blocks_per_batch = params['blocks_per_batch'] || params[:blocks_per_batch] || 10
 
+      chain_type = params['chain_type'] || params[:chain_type] || 'evm'
+
       @current_block = start_block
       @poller_status = 'polling'
       blocks_processed = 0
       max_blocks_before_continue = 100
 
+      # Select the right activity/workflow based on chain type
+      fetch_activity = chain_type == 'utxo' ? Indexer::UtxoFetchBlockActivity : Indexer::FetchBlockActivity
+      processor_workflow = chain_type == 'utxo' ? Indexer::UtxoBlockProcessorWorkflow : Indexer::BlockProcessorWorkflow
+
       while blocks_processed < max_blocks_before_continue
         # Fetch latest block number from chain
-        latest = Temporalio::Workflow.execute_activity(
-          Indexer::FetchBlockActivity,
-          { 'action' => 'get_latest', 'chain_id' => chain_id },
-          schedule_to_close_timeout: 30,
-          retry_policy: Temporalio::RetryPolicy.new(max_attempts: 5)
-        )
+        latest = begin
+                   Temporalio::Workflow.execute_activity(
+                     fetch_activity,
+                     { 'action' => 'get_latest', 'chain_id' => chain_id },
+                     schedule_to_close_timeout: 30,
+                     retry_policy: Temporalio::RetryPolicy.new(max_attempts: 5)
+                   )
+                 rescue => e
+                   Temporalio::Workflow.logger.error("get_latest failed, will retry after sleep: #{e.message}")
+                   Temporalio::Workflow.sleep(poll_interval * 5)
+                   next
+                 end
 
         if @current_block > latest
           Temporalio::Workflow.sleep(poll_interval)
@@ -42,7 +54,7 @@ module Indexer
         # Start all child workflows concurrently
         handles = (@current_block..end_block).map do |block_number|
           Temporalio::Workflow.start_child_workflow(
-            Indexer::BlockProcessorWorkflow,
+            processor_workflow,
             { 'chain_id' => chain_id, 'block_number' => block_number },
             id: "process-block-#{chain_id}-#{block_number}",
             task_queue: task_queue
@@ -68,6 +80,7 @@ module Indexer
       raise Temporalio::Workflow::ContinueAsNewError.new(
         {
           'chain_id' => chain_id,
+          'chain_type' => chain_type,
           'start_block' => @current_block,
           'poll_interval_seconds' => poll_interval,
           'blocks_per_batch' => blocks_per_batch

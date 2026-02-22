@@ -3,7 +3,7 @@
 class AssetTransfer < ApplicationRecord
   # NOTE: composite FK (token_address + chain_id) — use method instead of belongs_to for correctness
   validates :tx_hash, :block_number, :chain_id, :transfer_type, :amount, presence: true
-  validates :transfer_type, inclusion: { in: %w[native erc20 erc721 erc1155 internal] }
+  validates :transfer_type, inclusion: { in: %w[native erc20 erc721 erc1155 internal withdrawal mweb_pegin mweb_pegout mweb_confidential shielded_in shielded_out] }
 
   scope :by_chain, ->(chain_id) { where(chain_id: chain_id) }
   scope :by_block, ->(block_number) { where(block_number: block_number) }
@@ -29,6 +29,18 @@ class AssetTransfer < ApplicationRecord
     transfer_type == 'internal'
   end
 
+  def withdrawal?
+    transfer_type == 'withdrawal'
+  end
+
+  def confidential?
+    confidential == true
+  end
+
+  def mweb?
+    privacy_protocol == 'mweb'
+  end
+
   def token?
     %w[erc20 erc721 erc1155].include?(transfer_type)
   end
@@ -38,19 +50,28 @@ class AssetTransfer < ApplicationRecord
   end
 
   def formatted_amount
+    return '🔒 Confidential' if confidential?
     return '1 NFT' if nft? && token_id.present?
-    return format_eth(amount) if native? || internal?
+    if native? || internal? || withdrawal? || mweb?
+      chain = ChainConfig.find_by(chain_id: chain_id)
+      if chain&.chain_type == 'utxo'
+        return format_satoshi(amount, chain&.native_currency || 'BTC')
+      end
+      return format_eth(amount)
+    end
     return amount.to_s if token_contract.nil?
 
     token_contract.format_amount(amount)
   end
 
   def token_symbol
-    return 'ETH' if native? || internal?
+    chain = ChainConfig.find_by(chain_id: chain_id)
+    native = chain&.native_currency || 'ETH'
+    return native if native? || internal? || withdrawal? || mweb?
     return token_contract.display_name if token_contract
     return 'Unknown' if token_address.present?
 
-    'ETH'
+    native
   end
 
   def description
@@ -60,6 +81,7 @@ class AssetTransfer < ApplicationRecord
   end
 
   def tx_url
+    return nil if withdrawal? # pseudo tx_hash, not a real transaction
     chain_config = ChainConfig.find_by(chain_id: chain_id)
     return nil unless chain_config&.explorer_url
     "#{chain_config.explorer_url}/tx/#{tx_hash}"
@@ -77,5 +99,11 @@ class AssetTransfer < ApplicationRecord
     return '0' if wei.nil? || wei.zero?
     eth = wei.to_f / 1e18
     eth < 0.0001 ? '< 0.0001 ETH' : "#{'%.6f' % eth} ETH"
+  end
+
+  def format_satoshi(satoshi, symbol = 'BTC')
+    return '0' if satoshi.nil? || satoshi.zero?
+    coin = satoshi.to_f / 1e8
+    coin < 0.00000001 ? "< 0.00000001 #{symbol}" : "#{'%.8f' % coin} #{symbol}"
   end
 end

@@ -17,6 +17,7 @@ class EthereumRpc
                 end
     @current_index = 0
     @request_id = 0
+    @batch_limit = 10
   end
 
   def get_block_number
@@ -58,7 +59,13 @@ class EthereumRpc
     response_body = http_post_with_fallback(batch_body.to_json)
     parsed = JSON.parse(response_body)
 
-    parsed.sort_by { |r| r["id"] }.map do |r|
+    # Some RPCs return a single object instead of an array for batch requests
+    parsed = [parsed] if parsed.is_a?(Hash)
+    unless parsed.is_a?(Array)
+      raise RpcError, "Unexpected batch response type: #{parsed.class} — #{response_body[0..200]}"
+    end
+
+    parsed.sort_by { |r| r["id"].to_i }.map do |r|
       raise RpcError, r["error"]["message"] if r["error"]
       r["result"]
     end
@@ -67,7 +74,9 @@ class EthereumRpc
   def batch_get_transaction_receipts(tx_hashes)
     return [] if tx_hashes.empty?
     requests = tx_hashes.map { |hash| { method: "eth_getTransactionReceipt", params: [hash] } }
-    batch_call(requests)
+    # Chunk to respect public RPC batch size limits (typically 10)
+    chunk_size = @batch_limit || 10
+    requests.each_slice(chunk_size).flat_map { |chunk| batch_call(chunk) }
   end
 
   def fetch_full_block(block_number, supports_block_receipts: true)
