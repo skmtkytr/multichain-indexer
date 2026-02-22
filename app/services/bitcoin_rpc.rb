@@ -1,5 +1,11 @@
 # frozen_string_literal: true
 
+require 'net/http'
+require 'json'
+require 'uri'
+require 'securerandom'
+require 'bigdecimal'
+
 # Bitcoin Core compatible JSON-RPC client.
 # Works with Bitcoin, Litecoin, Dogecoin, Bitcoin Cash, Dash, Zcash etc.
 class BitcoinRpc
@@ -55,50 +61,14 @@ class BitcoinRpc
     }
   end
 
-  # Resolve input addresses/amounts from previous outputs.
-  # For inputs referencing txs already in our DB, use DB lookup.
-  # Otherwise fetch via RPC.
-  def resolve_inputs(inputs, chain_id)
-    inputs.map do |input|
-      next input if input['coinbase'] # coinbase input has no prev tx
-
-      prev_txid = input['txid']
-      prev_vout = input['vout']
-      next input unless prev_txid && prev_vout
-
-      # Try DB first
-      cached_output = UtxoOutput.find_by(
-        chain_id: chain_id,
-        txid: prev_txid,
-        vout_index: prev_vout
-      )
-
-      if cached_output
-        input.merge(
-          '_resolved_address' => cached_output.address,
-          '_resolved_amount' => cached_output.amount.to_i
-        )
-      else
-        # Fetch from RPC
-        begin
-          prev_tx = get_raw_transaction(prev_txid)
-          if prev_tx && prev_tx['vout'] && prev_tx['vout'][prev_vout]
-            vout = prev_tx['vout'][prev_vout]
-            address = extract_address(vout)
-            amount_satoshi = (BigDecimal(vout['value'].to_s) * 100_000_000).to_i
-            input.merge(
-              '_resolved_address' => address,
-              '_resolved_amount' => amount_satoshi
-            )
-          else
-            input
-          end
-        rescue => e
-          Rails.logger.warn("Failed to resolve input #{prev_txid}:#{prev_vout}: #{e.message}")
-          input
-        end
-      end
-    end
+  # Check if getrawtransaction is available (cached per instance)
+  def supports_getrawtransaction?
+    return @supports_getrawtx unless @supports_getrawtx.nil?
+    # Test with a dummy call — most public nodes disable this
+    call('getrawtransaction', ['0' * 64, true])
+    @supports_getrawtx = true
+  rescue
+    @supports_getrawtx = false
   end
 
   private

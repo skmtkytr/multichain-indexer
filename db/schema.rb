@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.1].define(version: 2026_02_22_100003) do
+ActiveRecord::Schema[8.1].define(version: 2026_02_22_100004) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "pg_catalog.plpgsql"
 
@@ -20,11 +20,11 @@ ActiveRecord::Schema[8.1].define(version: 2026_02_22_100003) do
     t.integer "chain_id", null: false
     t.boolean "confidential", default: false
     t.datetime "created_at", null: false
-    t.string "from_address", limit: 42
+    t.string "from_address", limit: 128
     t.integer "log_index", default: -1
     t.string "privacy_protocol"
-    t.string "to_address", limit: 42
-    t.string "token_address", limit: 42
+    t.string "to_address", limit: 128
+    t.string "token_address", limit: 128
     t.decimal "token_id", precision: 78
     t.integer "trace_index", default: -1
     t.string "transfer_type", null: false
@@ -79,7 +79,7 @@ ActiveRecord::Schema[8.1].define(version: 2026_02_22_100003) do
     t.jsonb "extra_data", default: {}
     t.decimal "gas_limit", precision: 78
     t.decimal "gas_used", precision: 78
-    t.string "miner", limit: 42
+    t.string "miner", limit: 128
     t.bigint "number", null: false
     t.string "parent_hash", limit: 66, null: false
     t.bigint "timestamp", null: false
@@ -114,17 +114,17 @@ ActiveRecord::Schema[8.1].define(version: 2026_02_22_100003) do
   create_table "indexed_transactions", force: :cascade do |t|
     t.bigint "block_number", null: false
     t.integer "chain_id", default: 1, null: false
-    t.string "contract_address", limit: 42
+    t.string "contract_address", limit: 128
     t.datetime "created_at", null: false
     t.jsonb "extra_data", default: {}
-    t.string "from_address", limit: 42, null: false
+    t.string "from_address", limit: 128, null: false
     t.decimal "gas_price", precision: 78
     t.decimal "gas_used", precision: 78
     t.text "input_data"
     t.decimal "max_fee_per_gas", precision: 78
     t.decimal "max_priority_fee_per_gas", precision: 78
     t.integer "status"
-    t.string "to_address", limit: 42
+    t.string "to_address", limit: 128
     t.string "tx_hash", limit: 66, null: false
     t.integer "tx_index", null: false
     t.datetime "updated_at", null: false
