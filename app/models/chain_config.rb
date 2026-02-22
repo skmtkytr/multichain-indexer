@@ -4,11 +4,12 @@ class ChainConfig < ApplicationRecord
   has_one :indexer_cursor, primary_key: :chain_id, foreign_key: :chain_id
 
   NETWORK_TYPES = %w[mainnet testnet devnet].freeze
-  CHAIN_TYPES = %w[evm utxo].freeze
+  CHAIN_TYPES = %w[evm utxo substrate].freeze
 
   validates :chain_id, presence: true, uniqueness: true
   validates :name, presence: true
   validates :rpc_url, presence: true, if: -> { evm? && rpc_endpoints.blank? }
+  validates :sidecar_url, presence: true, if: -> { substrate? }
   validates :network_type, inclusion: { in: NETWORK_TYPES }
   validates :chain_type, inclusion: { in: CHAIN_TYPES }
   validates :poll_interval_seconds, numericality: { greater_than: 0 }
@@ -57,7 +58,9 @@ class ChainConfig < ApplicationRecord
     800_000_000 => { name: "Bitcoin", rpc_url: nil, explorer_url: "https://mempool.space", native_currency: "BTC", block_time_ms: 600_000, network_type: "mainnet", chain_type: "utxo", enabled: false, poll_interval_seconds: 30, blocks_per_batch: 1 },
     800_000_002 => { name: "Litecoin", rpc_url: nil, explorer_url: "https://litecoinspace.org", native_currency: "LTC", block_time_ms: 150_000, network_type: "mainnet", chain_type: "utxo", enabled: false, poll_interval_seconds: 15, blocks_per_batch: 5 },
     800_000_003 => { name: "Dogecoin", rpc_url: nil, explorer_url: "https://dogechain.info", native_currency: "DOGE", block_time_ms: 60_000, network_type: "mainnet", chain_type: "utxo", enabled: false, poll_interval_seconds: 10, blocks_per_batch: 5 },
-    800_000_145 => { name: "Bitcoin Cash", rpc_url: nil, explorer_url: "https://blockchair.com/bitcoin-cash", native_currency: "BCH", block_time_ms: 600_000, network_type: "mainnet", chain_type: "utxo", enabled: false, poll_interval_seconds: 30, blocks_per_batch: 1 }
+    800_000_145 => { name: "Bitcoin Cash", rpc_url: nil, explorer_url: "https://blockchair.com/bitcoin-cash", native_currency: "BCH", block_time_ms: 600_000, network_type: "mainnet", chain_type: "utxo", enabled: false, poll_interval_seconds: 30, blocks_per_batch: 1 },
+    # Substrate chains — use 900_000_xxx namespace
+    900_000_001 => { name: "Polkadot Asset Hub", rpc_url: "https://polkadot-asset-hub-rpc.polkadot.io", sidecar_url: "https://polkadot-asset-hub-public-sidecar.parity-chains.parity.io", explorer_url: "https://assethub-polkadot.subscan.io", native_currency: "DOT", block_time_ms: 12_000, network_type: "mainnet", chain_type: "substrate", enabled: false, poll_interval_seconds: 6, blocks_per_batch: 10 }
   }.freeze
 
   def evm?
@@ -66,5 +69,9 @@ class ChainConfig < ApplicationRecord
 
   def utxo?
     chain_type == 'utxo'
+  end
+
+  def substrate?
+    chain_type == 'substrate'
   end
 end

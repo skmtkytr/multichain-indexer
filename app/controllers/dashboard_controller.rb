@@ -354,18 +354,33 @@ class DashboardController < ApplicationController
                 <input class="form-input" id="f-name" type="text" placeholder="BSC">
               </div>
             </div>
-            <div class="form-group">
-              <label class="form-label">Network Type</label>
-              <select class="form-input" id="f-network-type">
-                <option value="mainnet">Mainnet</option>
-                <option value="testnet">Testnet</option>
-                <option value="devnet">Devnet</option>
-              </select>
+            <div class="form-row">
+              <div class="form-group">
+                <label class="form-label">Chain Type *</label>
+                <select class="form-input" id="f-chain-type" onchange="onChainTypeChange()">
+                  <option value="evm">EVM</option>
+                  <option value="utxo">UTXO (Bitcoin)</option>
+                  <option value="substrate">Substrate</option>
+                </select>
+              </div>
+              <div class="form-group">
+                <label class="form-label">Network Type</label>
+                <select class="form-input" id="f-network-type">
+                  <option value="mainnet">Mainnet</option>
+                  <option value="testnet">Testnet</option>
+                  <option value="devnet">Devnet</option>
+                </select>
+              </div>
             </div>
             <div class="form-group">
               <label class="form-label">RPC URL *</label>
               <input class="form-input" id="f-rpc-url" type="url" placeholder="https://bsc-dataseed.binance.org">
               <div class="form-hint">HTTPS endpoint for JSON-RPC. Alchemy/Infura URLs with API keys supported.</div>
+            </div>
+            <div class="form-group" id="sidecar-url-group" style="display:none">
+              <label class="form-label">Sidecar URL (Substrate only)</label>
+              <input class="form-input" id="f-sidecar-url" type="url" placeholder="https://polkadot-asset-hub-public-sidecar.parity-chains.parity.io">
+              <div class="form-hint">Substrate Sidecar REST API endpoint for decoded extrinsics/events.</div>
             </div>
             <div class="form-group">
               <label class="form-label">Additional RPC Endpoints</label>
@@ -397,10 +412,18 @@ class DashboardController < ApplicationController
                 <input class="form-input" id="f-batch-size" type="number" value="10">
               </div>
             </div>
-            <div class="form-group">
-              <div class="form-check">
-                <input type="checkbox" id="f-enabled" checked>
-                <label class="form-label" for="f-enabled" style="margin:0">Enabled</label>
+            <div class="form-row">
+              <div class="form-group">
+                <div class="form-check">
+                  <input type="checkbox" id="f-enabled" checked>
+                  <label class="form-label" for="f-enabled" style="margin:0">Enabled</label>
+                </div>
+              </div>
+              <div class="form-group" id="supports-trace-group">
+                <div class="form-check">
+                  <input type="checkbox" id="f-supports-trace">
+                  <label class="form-label" for="f-supports-trace" style="margin:0">Supports Trace (EVM only)</label>
+                </div>
               </div>
             </div>
           </div>
@@ -502,14 +525,22 @@ class DashboardController < ApplicationController
         return eps;
       }
 
+      function onChainTypeChange() {
+        const ct = document.getElementById('f-chain-type').value;
+        document.getElementById('sidecar-url-group').style.display = ct === 'substrate' ? '' : 'none';
+        document.getElementById('supports-trace-group').style.display = ct === 'evm' ? '' : 'none';
+      }
+
       function showAddModal() {
         document.getElementById('modalMode').value = 'add';
         document.getElementById('modalTitle').textContent = 'Add Chain';
         document.getElementById('f-chain-id').value = '';
         document.getElementById('f-chain-id').disabled = false;
+        document.getElementById('f-chain-type').value = 'evm';
         document.getElementById('f-name').value = '';
         document.getElementById('f-network-type').value = 'mainnet';
         document.getElementById('f-rpc-url').value = '';
+        document.getElementById('f-sidecar-url').value = '';
         document.getElementById('rpc-endpoints-list').innerHTML = '';
         rpcEndpointIdx = 0;
         document.getElementById('f-explorer').value = '';
@@ -518,6 +549,8 @@ class DashboardController < ApplicationController
         document.getElementById('f-poll-interval').value = '2';
         document.getElementById('f-batch-size').value = '10';
         document.getElementById('f-enabled').checked = true;
+        document.getElementById('f-supports-trace').checked = false;
+        onChainTypeChange();
         document.getElementById('chainModal').classList.add('show');
       }
 
@@ -529,11 +562,12 @@ class DashboardController < ApplicationController
           document.getElementById('modalTitle').textContent = 'Edit ' + c.name;
           document.getElementById('f-chain-id').value = c.chain_id;
           document.getElementById('f-chain-id').disabled = true;
+          document.getElementById('f-chain-type').value = c.chain_type || 'evm';
           document.getElementById('f-name').value = c.name;
           document.getElementById('f-network-type').value = c.network_type || 'mainnet';
-          // For edit, fetch full RPC URL from a separate hidden endpoint or just leave masked
           document.getElementById('f-rpc-url').value = '';
           document.getElementById('f-rpc-url').placeholder = c.rpc_url + ' (leave blank to keep)';
+          document.getElementById('f-sidecar-url').value = c.sidecar_url || '';
           document.getElementById('rpc-endpoints-list').innerHTML = '';
           rpcEndpointIdx = 0;
           (c.rpc_endpoints || []).forEach(ep => addRpcEndpoint(ep.url || '', ep.label || '', ep.priority || ''));
@@ -543,6 +577,8 @@ class DashboardController < ApplicationController
           document.getElementById('f-poll-interval').value = c.poll_interval_seconds;
           document.getElementById('f-batch-size').value = c.blocks_per_batch;
           document.getElementById('f-enabled').checked = c.enabled;
+          document.getElementById('f-supports-trace').checked = c.supports_trace || false;
+          onChainTypeChange();
           document.getElementById('chainModal').classList.add('show');
         } catch(e) { showToast('Error loading chain: ' + e.message, 'error'); }
       }
@@ -555,10 +591,13 @@ class DashboardController < ApplicationController
         const mode = document.getElementById('modalMode').value;
         const body = {};
         if (mode === 'add') body.chain_id = parseInt(document.getElementById('f-chain-id').value);
+        body.chain_type = document.getElementById('f-chain-type').value;
         body.name = document.getElementById('f-name').value;
         body.network_type = document.getElementById('f-network-type').value;
         const rpc = document.getElementById('f-rpc-url').value;
         if (rpc) body.rpc_url = rpc;
+        const sidecar = document.getElementById('f-sidecar-url').value;
+        if (sidecar) body.sidecar_url = sidecar;
         const endpoints = getRpcEndpoints();
         if (endpoints.length > 0) body.rpc_endpoints = endpoints;
         body.explorer_url = document.getElementById('f-explorer').value || null;
@@ -567,6 +606,7 @@ class DashboardController < ApplicationController
         body.poll_interval_seconds = parseInt(document.getElementById('f-poll-interval').value);
         body.blocks_per_batch = parseInt(document.getElementById('f-batch-size').value);
         body.enabled = document.getElementById('f-enabled').checked;
+        body.supports_trace = document.getElementById('f-supports-trace').checked;
 
         try {
           let url, method;
@@ -750,7 +790,9 @@ class DashboardController < ApplicationController
           </div>
         </div>
         <div class="chain-card-body">
+          <div class="chain-card-row"><span class="chain-card-label">Type</span><span class="chain-card-value"><span class="chain-card-badge" style="font-size:10px;padding:1px 6px">#{(c.chain_type || 'evm').upcase}</span>#{c.chain_type == 'evm' && c.supports_trace ? ' <span style="color:#3fb950;font-size:10px">🔍 Trace</span>' : ''}</span></div>
           <div class="chain-card-row"><span class="chain-card-label">RPC</span><span class="chain-card-value" title="#{h c.rpc_url}">#{h c.rpc_url}</span></div>
+          #{c.sidecar_url.present? ? "<div class=\"chain-card-row\"><span class=\"chain-card-label\">Sidecar</span><span class=\"chain-card-value\">#{h c.sidecar_url}</span></div>" : ''}
           #{(c.rpc_endpoints || []).map { |ep| "<div class=\"chain-card-row\"><span class=\"chain-card-label\">#{h(ep['label'] || 'Endpoint')} (P#{ep['priority'] || '?'})</span><span class=\"chain-card-value\">#{h ep['url']}</span></div>" }.join}
           <div class="chain-card-row"><span class="chain-card-label">Currency</span><span class="chain-card-value">#{h c.native_currency}</span></div>
           <div class="chain-card-row"><span class="chain-card-label">Block Time</span><span class="chain-card-value">#{c.block_time_ms}ms</span></div>

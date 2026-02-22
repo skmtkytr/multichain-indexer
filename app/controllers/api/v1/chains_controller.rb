@@ -83,10 +83,11 @@ module Api
 
       def chain_params
         permitted = params.permit(
-          :chain_id, :name, :rpc_url, :chain_type,
+          :chain_id, :name, :rpc_url, :chain_type, :sidecar_url,
           :explorer_url, :native_currency, :block_time_ms,
           :poll_interval_seconds, :blocks_per_batch,
-          :max_rpc_batch_size, :enabled, :network_type
+          :max_rpc_batch_size, :enabled, :network_type,
+          :supports_trace
         )
         # Accept rpc_endpoints as JSON array
         if params[:rpc_endpoints].is_a?(Array)
@@ -113,6 +114,7 @@ module Api
           poll_interval_seconds: chain.poll_interval_seconds,
           blocks_per_batch: chain.blocks_per_batch,
           enabled: chain.enabled,
+          sidecar_url: mask ? mask_url(chain.sidecar_url) : chain.sidecar_url,
           supports_trace: chain.supports_trace,
           trace_method: chain.trace_method,
           status: chain.status,
@@ -122,6 +124,7 @@ module Api
 
       # Mask API keys in URLs for display
       def mask_url(url)
+        return nil if url.blank?
         uri = URI(url)
         if uri.path.length > 10
           # Likely contains API key in path (Alchemy/Infura style)

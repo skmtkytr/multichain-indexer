@@ -21,9 +21,12 @@ module Api
         return render json: { error: 'Already running' }, status: :conflict if cursor.running?
 
         # Determine start block using the appropriate RPC client
-        is_utxo = chain_config.chain_type == 'utxo'
-        rpc = is_utxo ? BitcoinRpc.new(chain_id: chain_id) : EthereumRpc.new(chain_id: chain_id)
-        latest_block = is_utxo ? rpc.get_block_count : rpc.get_block_number
+        rpc = case chain_config.chain_type
+              when 'utxo' then BitcoinRpc.new(chain_id: chain_id)
+              when 'substrate' then SubstrateRpc.new(chain_id: chain_id)
+              else EthereumRpc.new(chain_id: chain_id)
+              end
+        latest_block = chain_config.utxo? ? rpc.get_block_count : rpc.get_block_number
 
         from_block = if start_block.present?
                        start_block == 'latest' ? latest_block : start_block.to_i

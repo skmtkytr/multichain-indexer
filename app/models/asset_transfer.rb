@@ -3,7 +3,7 @@
 class AssetTransfer < ApplicationRecord
   # NOTE: composite FK (token_address + chain_id) — use method instead of belongs_to for correctness
   validates :tx_hash, :block_number, :chain_id, :transfer_type, :amount, presence: true
-  validates :transfer_type, inclusion: { in: %w[native erc20 erc721 erc1155 internal withdrawal mweb_pegin mweb_pegout mweb_confidential shielded_in shielded_out] }
+  validates :transfer_type, inclusion: { in: %w[native erc20 erc721 erc1155 internal withdrawal mweb_pegin mweb_pegout mweb_confidential shielded_in shielded_out substrate_asset foreign_asset substrate_nft] }
 
   scope :by_chain, ->(chain_id) { where(chain_id: chain_id) }
   scope :by_block, ->(block_number) { where(block_number: block_number) }
@@ -54,8 +54,10 @@ class AssetTransfer < ApplicationRecord
     return '1 NFT' if nft? && token_id.present?
     if native? || internal? || withdrawal? || mweb?
       chain = ChainConfig.find_by(chain_id: chain_id)
-      if chain&.chain_type == 'utxo'
+      if chain&.utxo?
         return format_satoshi(amount, chain&.native_currency || 'BTC')
+      elsif chain&.substrate?
+        return format_planck(amount, chain&.native_currency || 'DOT')
       end
       return format_eth(amount)
     end
@@ -105,5 +107,11 @@ class AssetTransfer < ApplicationRecord
     return '0' if satoshi.nil? || satoshi.zero?
     coin = satoshi.to_f / 1e8
     coin < 0.00000001 ? "< 0.00000001 #{symbol}" : "#{'%.8f' % coin} #{symbol}"
+  end
+
+  def format_planck(planck, symbol = 'DOT')
+    return '0' if planck.nil? || planck.zero?
+    dot = planck.to_f / 1e10  # 1 DOT = 10^10 planck
+    dot < 0.0001 ? "< 0.0001 #{symbol}" : "#{'%.4f' % dot} #{symbol}"
   end
 end

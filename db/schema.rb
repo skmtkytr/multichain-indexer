@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.1].define(version: 2026_02_22_100004) do
+ActiveRecord::Schema[8.1].define(version: 2026_02_22_100006) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "pg_catalog.plpgsql"
 
@@ -54,6 +54,7 @@ ActiveRecord::Schema[8.1].define(version: 2026_02_22_100004) do
     t.jsonb "rpc_endpoints", default: []
     t.string "rpc_url"
     t.string "rpc_url_fallback"
+    t.string "sidecar_url"
     t.boolean "supports_block_receipts", default: true, null: false
     t.boolean "supports_trace", default: false
     t.string "trace_method"
@@ -144,6 +145,41 @@ ActiveRecord::Schema[8.1].define(version: 2026_02_22_100004) do
     t.string "status", default: "stopped", null: false
     t.datetime "updated_at", null: false
     t.index ["chain_id"], name: "index_indexer_cursors_on_chain_id", unique: true
+  end
+
+  create_table "substrate_events", force: :cascade do |t|
+    t.bigint "block_number", null: false
+    t.integer "chain_id", null: false
+    t.datetime "created_at", null: false
+    t.jsonb "data", default: {}
+    t.integer "event_index", null: false
+    t.integer "extrinsic_index"
+    t.string "method", null: false
+    t.string "pallet", null: false
+    t.datetime "updated_at", null: false
+    t.index ["chain_id", "block_number", "event_index"], name: "idx_sub_evt_unique", unique: true
+    t.index ["chain_id", "block_number", "extrinsic_index"], name: "idx_sub_evt_ext"
+    t.index ["chain_id", "pallet", "method"], name: "idx_sub_evt_pallet"
+  end
+
+  create_table "substrate_extrinsics", force: :cascade do |t|
+    t.jsonb "args", default: {}
+    t.bigint "block_number", null: false
+    t.integer "chain_id", null: false
+    t.datetime "created_at", null: false
+    t.string "extrinsic_hash"
+    t.integer "extrinsic_index", null: false
+    t.decimal "fee", precision: 30
+    t.string "method", null: false
+    t.string "pallet", null: false
+    t.string "signer", limit: 128
+    t.boolean "success", default: true
+    t.decimal "tip", precision: 30, default: "0"
+    t.datetime "updated_at", null: false
+    t.index ["chain_id", "block_number", "extrinsic_index"], name: "idx_sub_ext_unique", unique: true
+    t.index ["chain_id", "pallet", "method"], name: "idx_sub_ext_pallet"
+    t.index ["extrinsic_hash"], name: "index_substrate_extrinsics_on_extrinsic_hash"
+    t.index ["signer"], name: "index_substrate_extrinsics_on_signer"
   end
 
   create_table "token_contracts", force: :cascade do |t|

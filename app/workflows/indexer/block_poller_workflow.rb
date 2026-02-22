@@ -24,8 +24,14 @@ module Indexer
       max_blocks_before_continue = 100
 
       # Select the right activity/workflow based on chain type
-      fetch_activity = chain_type == 'utxo' ? Indexer::UtxoFetchBlockActivity : Indexer::FetchBlockActivity
-      processor_workflow = chain_type == 'utxo' ? Indexer::UtxoBlockProcessorWorkflow : Indexer::BlockProcessorWorkflow
+      fetch_activity, processor_workflow = case chain_type
+      when 'utxo'
+        [Indexer::UtxoFetchBlockActivity, Indexer::UtxoBlockProcessorWorkflow]
+      when 'substrate'
+        [Indexer::SubstrateFetchBlockActivity, Indexer::SubstrateBlockProcessorWorkflow]
+      else
+        [Indexer::FetchBlockActivity, Indexer::BlockProcessorWorkflow]
+      end
 
       while blocks_processed < max_blocks_before_continue
         # Fetch latest block number from chain

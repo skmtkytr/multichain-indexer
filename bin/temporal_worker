@@ -30,7 +30,8 @@ worker = Temporalio::Worker.new(
   workflows: [
     Indexer::BlockPollerWorkflow,
     Indexer::BlockProcessorWorkflow,
-    Indexer::UtxoBlockProcessorWorkflow
+    Indexer::UtxoBlockProcessorWorkflow,
+    Indexer::SubstrateBlockProcessorWorkflow
   ],
   activities: [
     Indexer::FetchBlockActivity,
@@ -39,7 +40,8 @@ worker = Temporalio::Worker.new(
     Indexer::ProcessLogActivity,
     Indexer::DecodeTransfersActivity,
     Indexer::FetchTracesActivity,
-    Indexer::UtxoFetchBlockActivity
+    Indexer::UtxoFetchBlockActivity,
+    Indexer::SubstrateFetchBlockActivity
   ]
 )
 
