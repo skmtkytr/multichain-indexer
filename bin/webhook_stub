@@ -1,0 +1,76 @@
+#!/usr/bin/env ruby
+# frozen_string_literal: true
+
+# Simple webhook receiver stub for testing (no gem dependencies)
+# Usage: ruby bin/webhook_stub [port]
+
+require 'socket'
+require 'json'
+
+port = (ARGV[0] || 4567).to_i
+received = []
+
+server = TCPServer.new('0.0.0.0', port)
+puts "🔔 Webhook stub listening on http://localhost:#{port}"
+puts "   POST /         → receive webhooks"
+puts "   GET  /history  → view recent payloads (JSON)"
+puts "   Ctrl+C to stop"
+puts
+
+loop do
+  client = server.accept
+  request_line = client.gets
+  next client.close unless request_line
+
+  method, path, = request_line.split(' ')
+  headers = {}
+  while (line = client.gets) && line.strip != ''
+    key, val = line.split(':', 2)
+    headers[key.strip.downcase] = val&.strip
+  end
+
+  body = nil
+  if (len = headers['content-length']&.to_i) && len > 0
+    body = client.read(len)
+  end
+
+  if method == 'POST'
+    parsed = begin; JSON.parse(body); rescue; body; end
+    sig = headers['x-webhook-signature']
+    wh_id = headers['x-webhook-id']
+
+    entry = { time: Time.now.strftime('%H:%M:%S'), id: wh_id, body: parsed }
+    received << entry
+
+    puts "\n#{'=' * 60}"
+    puts "📨 ##{received.size} [#{entry[:time]}]  ID: #{wh_id}"
+    puts "   Sig: #{sig&.slice(0, 20)}..."
+    if parsed.is_a?(Hash)
+      puts "   Event: #{parsed['event']}"
+      if (t = parsed['transfer'])
+        puts "   Chain: #{t['chain_name']} (#{t['chain_id']})"
+        puts "   Block: #{t['block_number']}"
+        puts "   Type:  #{t['transfer_type']}"
+        puts "   From:  #{t['from_address']}"
+        puts "   To:    #{t['to_address']}"
+        puts "   Amt:   #{t['amount']} #{t['token_symbol']}"
+        puts "   Tx:    #{t['tx_hash']}"
+      end
+    end
+    puts '=' * 60
+
+    resp = { status: 'ok', received: received.size }.to_json
+    client.print "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: #{resp.bytesize}\r\nConnection: close\r\n\r\n#{resp}"
+  elsif method == 'GET' && path == '/history'
+    resp = JSON.pretty_generate(received.last(50))
+    client.print "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: #{resp.bytesize}\r\nConnection: close\r\n\r\n#{resp}"
+  else
+    resp = "Webhook stub running. #{received.size} received.\n"
+    client.print "HTTP/1.1 200 OK\r\nContent-Type: text/plain\r\nContent-Length: #{resp.bytesize}\r\nConnection: close\r\n\r\n#{resp}"
+  end
+
+  client.close
+rescue => e
+  puts "⚠️  #{e.message}"
+  client&.close
+end

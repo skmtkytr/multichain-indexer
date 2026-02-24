@@ -1,5 +1,8 @@
 # frozen_string_literal: true
 
+require 'net/http'
+require 'openssl'
+
 module Api
   module V1
     class SubscriptionsController < ApplicationController
