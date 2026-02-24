@@ -63,6 +63,7 @@ class DashboardController < ApplicationController
               when 'transfers' then transfers_page
               when 'tokens' then tokens_page
               when 'address' then address_page
+              when 'webhooks' then webhooks_page
               else overview_page
               end
             }
@@ -229,6 +230,7 @@ class DashboardController < ApplicationController
         <a class="nav-item #{@page == 'transfers' ? 'active' : ''}" href="/?page=transfers&chain_id=#{@stats[:chain_id]}">💸 Asset Transfers</a>
         <a class="nav-item #{@page == 'tokens' ? 'active' : ''}" href="/?page=tokens&chain_id=#{@stats[:chain_id]}">🪙 Token Contracts</a>
         <a class="nav-item #{@page == 'address' ? 'active' : ''}" href="/?page=address&chain_id=#{@stats[:chain_id]}">🔍 Address Lookup</a>
+        <a class="nav-item #{@page == 'webhooks' ? 'active' : ''}" href="/?page=webhooks">🔔 Webhooks</a>
         <a class="nav-item #{@page == 'chains' ? 'active' : ''}" href="/?page=chains">⚙️ Chain Config</a>
 
         #{chain_items}
@@ -303,6 +305,255 @@ class DashboardController < ApplicationController
         <h3>Recent Event Logs</h3>
         #{logs_table}
       </div>
+    HTML
+  end
+
+  def webhooks_page
+    @subscriptions = AddressSubscription.order(created_at: :desc)
+    dispatcher_running = begin
+      handle = TemporalClient.connection.workflow_handle('webhook-dispatcher')
+      handle.describe
+      true
+    rescue StandardError
+      false
+    end
+    pending_count = WebhookDelivery.pending.count
+    unprocessed_count = AssetTransfer.where(webhook_processed: false).count
+
+    sub_rows = @subscriptions.map do |s|
+      chain_name = s.chain_id ? (ChainConfig.find_by(chain_id: s.chain_id)&.name || s.chain_id.to_s) : 'All'
+      types = s.transfer_types&.join(', ') || 'All'
+      <<~ROW
+        <tr>
+          <td><span class="addr" title="#{h s.address}">#{h s.address[0..12]}...</span></td>
+          <td>#{h chain_name}</td>
+          <td>#{h s.direction}</td>
+          <td>#{h types}</td>
+          <td><span class="addr" title="#{h s.webhook_url}">#{h s.webhook_url.truncate(40)}</span></td>
+          <td>#{s.label}</td>
+          <td><span class="dot #{s.enabled? ? 'running' : 'stopped'}" style="display:inline-block;margin-right:4px"></span>#{s.enabled? ? 'Active' : 'Disabled'}</td>
+          <td>#{s.failure_count}/#{s.max_failures}</td>
+          <td>
+            <button class="btn btn-sm btn-test" onclick="testWebhook(#{s.id})">🧪</button>
+            <button class="btn btn-sm btn-outline" onclick="editSub(#{s.id})">✏️</button>
+            <button class="btn btn-sm btn-outline" onclick="toggleSub(#{s.id}, #{!s.enabled?})">#{s.enabled? ? '⏸' : '▶'}</button>
+            <button class="btn btn-sm btn-danger" onclick="deleteSub(#{s.id})">🗑</button>
+          </td>
+        </tr>
+      ROW
+    end.join
+
+    <<~HTML
+      <div class="page-header">
+        <div>
+          <div class="page-title">🔔 Webhook Subscriptions</div>
+          <div class="page-subtitle">Monitor addresses and receive webhook notifications</div>
+        </div>
+        <div style="display:flex;gap:8px;align-items:center">
+          <button class="btn btn-primary" onclick="showSubModal()">+ Add Subscription</button>
+          <button class="btn #{dispatcher_running ? 'btn-danger' : 'btn-primary'}" onclick="toggleDispatcher(#{!dispatcher_running})" id="dispatcher-btn">
+            #{dispatcher_running ? '⏹ Stop Dispatcher' : '▶ Start Dispatcher'}
+          </button>
+        </div>
+      </div>
+
+      <div class="stats-grid" style="margin-bottom:16px">
+        <div class="stat-card">
+          <div class="stat-value">#{dispatcher_running ? '🟢 Running' : '🔴 Stopped'}</div>
+          <div class="stat-label">Dispatcher</div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-value">#{@subscriptions.select(&:enabled?).size}</div>
+          <div class="stat-label">Active Subscriptions</div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-value">#{pending_count}</div>
+          <div class="stat-label">Pending Deliveries</div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-value">#{unprocessed_count}</div>
+          <div class="stat-label">Unprocessed Transfers</div>
+        </div>
+      </div>
+
+      <div id="webhook-test-result" style="margin-bottom:8px;font-size:12px;display:none"></div>
+
+      #{sub_rows.empty? ? '<div class="empty">No subscriptions yet. Add one to start monitoring addresses.</div>' : "
+      <table>
+        <thead><tr><th>Address</th><th>Chain</th><th>Direction</th><th>Types</th><th>Webhook URL</th><th>Label</th><th>Status</th><th>Failures</th><th>Actions</th></tr></thead>
+        <tbody>#{sub_rows}</tbody>
+      </table>"}
+
+      #{webhook_modal}
+      #{webhook_js}
+    HTML
+  end
+
+  def webhook_modal
+    chain_options = @chain_configs.map { |c| "<option value=\"#{c.chain_id}\">#{h c.name} (#{c.chain_id})</option>" }.join
+    <<~HTML
+      <div class="modal-overlay" id="subModal">
+        <div class="modal">
+          <div class="modal-header">
+            <span class="modal-title" id="subModalTitle">Add Subscription</span>
+            <button class="modal-close" onclick="closeSubModal()">&times;</button>
+          </div>
+          <div class="modal-body">
+            <input type="hidden" id="subModalMode" value="add">
+            <div class="form-group">
+              <label class="form-label">Address *</label>
+              <input class="form-input" id="fs-address" type="text" placeholder="0xd8dA6BF26964aF9D7eEd9e03E53415D37aA96045">
+            </div>
+            <div class="form-row">
+              <div class="form-group">
+                <label class="form-label">Chain</label>
+                <select class="form-input" id="fs-chain">
+                  <option value="">All Chains</option>
+                  #{chain_options}
+                </select>
+              </div>
+              <div class="form-group">
+                <label class="form-label">Direction</label>
+                <select class="form-input" id="fs-direction">
+                  <option value="both">Both</option>
+                  <option value="incoming">Incoming</option>
+                  <option value="outgoing">Outgoing</option>
+                </select>
+              </div>
+            </div>
+            <div class="form-group">
+              <label class="form-label">Webhook URL *</label>
+              <input class="form-input" id="fs-webhook" type="url" placeholder="https://your-server.com/webhook">
+            </div>
+            <div class="form-group">
+              <label class="form-label">Label</label>
+              <input class="form-input" id="fs-label" type="text" placeholder="My wallet monitor">
+            </div>
+            <div class="form-group">
+              <label class="form-label">Transfer Types (leave empty for all)</label>
+              <div style="display:flex;flex-wrap:wrap;gap:8px;margin-top:4px">
+                #{%w[native erc20 erc721 erc1155 internal withdrawal substrate_asset foreign_asset].map { |t|
+                  "<label style='font-size:12px;display:flex;align-items:center;gap:3px'><input type='checkbox' class='fs-type-check' value='#{t}'> #{t}</label>"
+                }.join}
+              </div>
+            </div>
+          </div>
+          <div class="modal-footer">
+            <button class="btn btn-outline" onclick="closeSubModal()">Cancel</button>
+            <button class="btn btn-primary" onclick="saveSub()">Save</button>
+          </div>
+        </div>
+      </div>
+    HTML
+  end
+
+  def webhook_js
+    <<~HTML
+      <script>
+      function showSubModal() {
+        document.getElementById('subModalMode').value = 'add';
+        document.getElementById('subModalTitle').textContent = 'Add Subscription';
+        document.getElementById('fs-address').value = '';
+        document.getElementById('fs-chain').value = '';
+        document.getElementById('fs-direction').value = 'both';
+        document.getElementById('fs-webhook').value = '';
+        document.getElementById('fs-label').value = '';
+        document.querySelectorAll('.fs-type-check').forEach(c => c.checked = false);
+        document.getElementById('subModal').classList.add('show');
+      }
+
+      async function editSub(id) {
+        try {
+          const res = await fetch('/api/v1/subscriptions/' + id);
+          const s = await res.json();
+          document.getElementById('subModalMode').value = 'edit-' + id;
+          document.getElementById('subModalTitle').textContent = 'Edit Subscription';
+          document.getElementById('fs-address').value = s.address;
+          document.getElementById('fs-chain').value = s.chain_id || '';
+          document.getElementById('fs-direction').value = s.direction;
+          document.getElementById('fs-webhook').value = s.webhook_url;
+          document.getElementById('fs-label').value = s.label || '';
+          document.querySelectorAll('.fs-type-check').forEach(c => {
+            c.checked = s.transfer_types ? s.transfer_types.includes(c.value) : false;
+          });
+          document.getElementById('subModal').classList.add('show');
+        } catch(e) { showToast('Error: ' + e.message, 'error'); }
+      }
+
+      function closeSubModal() { document.getElementById('subModal').classList.remove('show'); }
+
+      async function saveSub() {
+        const mode = document.getElementById('subModalMode').value;
+        const body = {
+          address: document.getElementById('fs-address').value,
+          webhook_url: document.getElementById('fs-webhook').value,
+          direction: document.getElementById('fs-direction').value,
+          label: document.getElementById('fs-label').value || null
+        };
+        const chainVal = document.getElementById('fs-chain').value;
+        if (chainVal) body.chain_id = parseInt(chainVal);
+        const types = [];
+        document.querySelectorAll('.fs-type-check:checked').forEach(c => types.push(c.value));
+        if (types.length > 0) body.transfer_types = types;
+
+        try {
+          let url, method;
+          if (mode === 'add') { url = '/api/v1/subscriptions'; method = 'POST'; }
+          else { url = '/api/v1/subscriptions/' + mode.replace('edit-',''); method = 'PATCH'; }
+          const res = await fetch(url, { method, headers: {'Content-Type':'application/json'}, body: JSON.stringify(body) });
+          const data = await res.json();
+          if (res.ok) { closeSubModal(); showToast('Saved!','success'); setTimeout(()=>location.reload(),800); }
+          else { showToast((data.errors||[data.error]).join(', '),'error'); }
+        } catch(e) { showToast('Error: '+e.message,'error'); }
+      }
+
+      async function deleteSub(id) {
+        if (!confirm('Delete this subscription?')) return;
+        try {
+          await fetch('/api/v1/subscriptions/'+id, {method:'DELETE'});
+          showToast('Deleted','success');
+          setTimeout(()=>location.reload(),500);
+        } catch(e) { showToast('Error: '+e.message,'error'); }
+      }
+
+      async function toggleSub(id, enable) {
+        try {
+          await fetch('/api/v1/subscriptions/'+id, {
+            method:'PATCH', headers:{'Content-Type':'application/json'},
+            body: JSON.stringify({enabled:enable})
+          });
+          location.reload();
+        } catch(e) { showToast('Error: '+e.message,'error'); }
+      }
+
+      async function testWebhook(id) {
+        const el = document.getElementById('webhook-test-result');
+        el.style.display = 'block';
+        el.textContent = 'Sending test...';
+        el.style.color = '#8b949e';
+        try {
+          const res = await fetch('/api/v1/subscriptions/'+id+'/test', {method:'POST'});
+          const data = await res.json();
+          if (data.status === 'ok') {
+            el.innerHTML = '✅ Test webhook delivered (HTTP '+data.response_code+')';
+            el.style.color = '#3fb950';
+          } else {
+            el.innerHTML = '❌ '+data.response_code+': '+(data.error||data.response_body||'Failed');
+            el.style.color = '#f85149';
+          }
+        } catch(e) { el.innerHTML = '❌ '+e.message; el.style.color = '#f85149'; }
+      }
+
+      async function toggleDispatcher(start) {
+        try {
+          const action = start ? 'start' : 'stop';
+          const res = await fetch('/api/v1/webhooks/dispatcher/'+action, {method:'POST'});
+          const data = await res.json();
+          showToast('Dispatcher '+(start?'started':'stopped'),'success');
+          setTimeout(()=>location.reload(),1000);
+        } catch(e) { showToast('Error: '+e.message,'error'); }
+      }
+      </script>
     HTML
   end
 
@@ -639,7 +890,7 @@ class DashboardController < ApplicationController
       }
 
       // Auto-refresh on overview (not chains/address page)
-      if (!window.location.search.includes('page=chains') && !window.location.search.includes('page=address')) {
+      if (!window.location.search.includes('page=chains') && !window.location.search.includes('page=address') && !window.location.search.includes('page=webhooks')) {
         setTimeout(() => location.reload(), 10000);
       }
 
