@@ -45,7 +45,7 @@ module Api
             'blocks_per_batch' => chain_config.blocks_per_batch
           },
           id: "evm-indexer-chain-#{chain_id}",
-          task_queue: ENV.fetch('TEMPORAL_TASK_QUEUE', 'evm-indexer')
+          task_queue: chain_config.task_queue
         )
 
         cursor.mark_running!

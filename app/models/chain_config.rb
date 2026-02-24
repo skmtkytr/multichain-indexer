@@ -36,6 +36,12 @@ class ChainConfig < ApplicationRecord
     rpc_url_list.first || rpc_url
   end
 
+  # Task queue for this chain — isolates chains from each other
+  def task_queue
+    base = ENV.fetch('TEMPORAL_TASK_QUEUE', 'evm-indexer')
+    "#{base}-chain-#{chain_id}"
+  end
+
   def status
     indexer_cursor&.status || "not_initialized"
   end

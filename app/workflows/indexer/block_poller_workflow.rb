@@ -6,20 +6,26 @@ module Indexer
   # Long-running workflow that continuously polls for new blocks.
   # Uses continue-as-new to avoid unbounded history growth.
   # Processes blocks in parallel batches for throughput.
+  #
+  # Signals: pause, resume
+  # Queries: current_block, poller_status
   class BlockPollerWorkflow < Temporalio::Workflow::Definition
     workflow_query_attr_reader :current_block
     workflow_query_attr_reader :poller_status
+
+    GET_LATEST_START_TO_CLOSE = 15
+    GET_LATEST_SCHEDULE_TO_CLOSE = 60
 
     def execute(params)
       chain_id = params['chain_id'] || params[:chain_id]
       start_block = params['start_block'] || params[:start_block]
       poll_interval = params['poll_interval_seconds'] || params[:poll_interval_seconds] || 2
       blocks_per_batch = params['blocks_per_batch'] || params[:blocks_per_batch] || 10
-
       chain_type = params['chain_type'] || params[:chain_type] || 'evm'
 
       @current_block = start_block
       @poller_status = 'polling'
+      @paused = false
       blocks_processed = 0
       max_blocks_before_continue = 100
 
@@ -34,12 +40,20 @@ module Indexer
       end
 
       while blocks_processed < max_blocks_before_continue
+        # Handle pause signal
+        if @paused
+          @poller_status = 'paused'
+          Temporalio::Workflow.wait_condition { !@paused }
+          @poller_status = 'polling'
+        end
+
         # Fetch latest block number from chain
         latest = begin
                    Temporalio::Workflow.execute_activity(
                      fetch_activity,
                      { 'action' => 'get_latest', 'chain_id' => chain_id },
-                     schedule_to_close_timeout: 30,
+                     start_to_close_timeout: GET_LATEST_START_TO_CLOSE,
+                     schedule_to_close_timeout: GET_LATEST_SCHEDULE_TO_CLOSE,
                      retry_policy: Temporalio::RetryPolicy.new(max_attempts: 5)
                    )
                  rescue => e
@@ -55,9 +69,9 @@ module Indexer
 
         # Process blocks in parallel batches
         end_block = [@current_block + blocks_per_batch - 1, latest].min
-        task_queue = ENV.fetch('TEMPORAL_TASK_QUEUE', 'evm-indexer')
+        # Task queue passed from the workflow's own task queue (chain-specific)
+        task_queue = Temporalio::Workflow.info.task_queue
 
-        # Start all child workflows concurrently
         handles = (@current_block..end_block).map do |block_number|
           Temporalio::Workflow.start_child_workflow(
             processor_workflow,
@@ -67,7 +81,6 @@ module Indexer
           )
         end
 
-        # Wait for all to complete (tolerate individual block failures)
         handles.each do |handle|
           begin
             handle.result
@@ -96,7 +109,12 @@ module Indexer
 
     workflow_signal
     def pause
-      @poller_status = 'paused'
+      @paused = true
+    end
+
+    workflow_signal
+    def resume
+      @paused = false
     end
   end
 end

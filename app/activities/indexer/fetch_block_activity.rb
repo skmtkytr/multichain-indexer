@@ -8,6 +8,15 @@ module Indexer
       action = params['action']
       chain_id = params['chain_id']
 
+      _execute(action, chain_id, params)
+    rescue EthereumRpc::NonRetryableError => e
+      raise Temporalio::Error::ApplicationError.new(e.message, type: 'NonRetryableError', non_retryable: true)
+    end
+
+    private
+
+    def _execute(action, chain_id, params)
+
       case action
       when 'get_latest'
         rpc = EthereumRpc.new(chain_id: chain_id)

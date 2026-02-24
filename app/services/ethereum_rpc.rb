@@ -4,6 +4,8 @@ require "json"
 class EthereumRpc
   class RpcError < StandardError; end
   class AllEndpointsFailedError < StandardError; end
+  # Non-retryable: block doesn't exist, method not supported, invalid params
+  class NonRetryableError < StandardError; end
 
   def initialize(rpc_url: nil, chain_id: nil)
     @chain_id = chain_id
@@ -199,6 +201,11 @@ class EthereumRpc
     raise AllEndpointsFailedError, "All RPC endpoints failed for batch call. Last error: #{last_error&.message}"
   end
 
+  # Non-retryable RPC error codes/messages
+  # -32601: Method not found, -32602: Invalid params, -32000: block not found (some nodes)
+  NON_RETRYABLE_CODES = [-32601, -32602].freeze
+  NON_RETRYABLE_PATTERNS = /method not found|does not exist|invalid argument|invalid block number/i
+
   # Single JSON-RPC call to a specific URL
   def call_single(rpc_url, method, params = [])
     @request_id += 1
@@ -207,7 +214,14 @@ class EthereumRpc
     response_body = http_post(rpc_url, body)
     parsed = JSON.parse(response_body)
 
-    raise RpcError, parsed["error"]["message"] if parsed["error"]
+    if parsed["error"]
+      msg = parsed["error"]["message"]
+      code = parsed["error"]["code"]
+      if NON_RETRYABLE_CODES.include?(code) || msg&.match?(NON_RETRYABLE_PATTERNS)
+        raise NonRetryableError, "#{method}: #{msg} (code: #{code})"
+      end
+      raise RpcError, msg
+    end
     parsed["result"]
   end
 

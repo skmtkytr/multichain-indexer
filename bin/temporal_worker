@@ -24,29 +24,53 @@ end
 
 raise 'Could not connect to Temporal after 5 attempts' if client.nil?
 
-worker = Temporalio::Worker.new(
-  client: client,
-  task_queue: ENV.fetch('TEMPORAL_TASK_QUEUE', 'evm-indexer'),
-  workflows: [
-    Indexer::BlockPollerWorkflow,
-    Indexer::BlockProcessorWorkflow,
-    Indexer::UtxoBlockProcessorWorkflow,
-    Indexer::SubstrateBlockProcessorWorkflow,
-    Indexer::WebhookDispatcherWorkflow
-  ],
-  activities: [
-    Indexer::FetchBlockActivity,
-    Indexer::ProcessBlockActivity,
-    Indexer::ProcessTransactionActivity,
-    Indexer::ProcessLogActivity,
-    Indexer::DecodeTransfersActivity,
-    Indexer::FetchTracesActivity,
-    Indexer::UtxoFetchBlockActivity,
-    Indexer::SubstrateFetchBlockActivity,
-    Indexer::WebhookDispatchActivity
-  ]
-)
+base_queue = ENV.fetch('TEMPORAL_TASK_QUEUE', 'evm-indexer')
 
-Rails.logger.info "Temporal worker connected and running on task queue: #{ENV.fetch('TEMPORAL_TASK_QUEUE',
-                                                                                    'evm-indexer')}"
-worker.run(shutdown_signals: %w[SIGINT SIGTERM])
+workflows = [
+  Indexer::BlockPollerWorkflow,
+  Indexer::BlockProcessorWorkflow,
+  Indexer::UtxoBlockProcessorWorkflow,
+  Indexer::SubstrateBlockProcessorWorkflow,
+  Indexer::WebhookDispatcherWorkflow
+]
+
+activities = [
+  Indexer::FetchBlockActivity,
+  Indexer::ProcessBlockActivity,
+  Indexer::ProcessTransactionActivity,
+  Indexer::ProcessLogActivity,
+  Indexer::DecodeTransfersActivity,
+  Indexer::FetchTracesActivity,
+  Indexer::UtxoFetchBlockActivity,
+  Indexer::SubstrateFetchBlockActivity,
+  Indexer::WebhookDispatchActivity
+]
+
+# Build task queues: base queue (for webhook dispatcher) + per-chain queues
+task_queues = [base_queue]
+ChainConfig.enabled.find_each do |chain|
+  task_queues << chain.task_queue
+end
+task_queues.uniq!
+
+puts "Task queues: #{task_queues.join(', ')}"
+
+# Run all workers concurrently in threads
+threads = task_queues.map do |queue|
+  Thread.new(queue) do |q|
+    worker = Temporalio::Worker.new(
+      client: client,
+      task_queue: q,
+      workflows: workflows,
+      activities: activities
+    )
+    Rails.logger.info "Worker started on task queue: #{q}"
+    worker.run(shutdown_signals: %w[SIGINT SIGTERM])
+  rescue => e
+    Rails.logger.error "Worker on #{q} crashed: #{e.class} #{e.message}"
+    raise
+  end
+end
+
+puts "#{threads.size} workers running. Press Ctrl+C to stop."
+threads.each(&:join)

@@ -4,7 +4,10 @@ require 'temporalio/workflow'
 
 module Indexer
   class SubstrateBlockProcessorWorkflow < Temporalio::Workflow::Definition
-    ACTIVITY_TIMEOUT = 120
+    FETCH_START_TO_CLOSE = 60
+    FETCH_SCHEDULE_TO_CLOSE = 300
+    CURSOR_START_TO_CLOSE = 10
+    CURSOR_SCHEDULE_TO_CLOSE = 30
 
     def execute(params)
       chain_id = params['chain_id'] || params[:chain_id]
@@ -13,23 +16,26 @@ module Indexer
       retry_policy = Temporalio::RetryPolicy.new(
         max_attempts: 5,
         initial_interval: 1,
-        backoff_coefficient: 2.0
+        backoff_coefficient: 2.0,
+        max_interval: 30,
+        non_retryable_error_types: ['NonRetryableError']
       )
 
       result = Temporalio::Workflow.execute_activity(
         Indexer::SubstrateFetchBlockActivity,
         { 'action' => 'fetch_and_store', 'chain_id' => chain_id, 'block_number' => block_number },
-        schedule_to_close_timeout: ACTIVITY_TIMEOUT,
+        start_to_close_timeout: FETCH_START_TO_CLOSE,
+        schedule_to_close_timeout: FETCH_SCHEDULE_TO_CLOSE,
         retry_policy: retry_policy
       )
 
       return if result.nil?
 
-      # Update cursor
       Temporalio::Workflow.execute_activity(
         Indexer::ProcessBlockActivity,
         { 'action' => 'update_cursor', 'chain_id' => chain_id, 'block_number' => block_number },
-        schedule_to_close_timeout: 10
+        start_to_close_timeout: CURSOR_START_TO_CLOSE,
+        schedule_to_close_timeout: CURSOR_SCHEDULE_TO_CLOSE
       )
     end
   end
