@@ -401,8 +401,8 @@ class DashboardController < ApplicationController
           <div class="modal-body">
             <input type="hidden" id="subModalMode" value="add">
             <div class="form-group">
-              <label class="form-label">Address *</label>
-              <input class="form-input" id="fs-address" type="text" placeholder="0xd8dA6BF26964aF9D7eEd9e03E53415D37aA96045">
+              <label class="form-label">Addresses * <span style="font-weight:normal;color:#8b949e">(one per line or comma-separated)</span></label>
+              <textarea class="form-input" id="fs-address" rows="4" placeholder="0xd8dA6BF26964aF9D7eEd9e03E53415D37aA96045&#10;0xAb5801a7D398351b8bE11C439e05C5B3259aeC9B&#10;..."></textarea>
             </div>
             <div class="form-row">
               <div class="form-group">
@@ -484,26 +484,43 @@ class DashboardController < ApplicationController
 
       async function saveSub() {
         const mode = document.getElementById('subModalMode').value;
-        const body = {
-          address: document.getElementById('fs-address').value,
+        const raw = document.getElementById('fs-address').value;
+        const addresses = raw.split(/[,\\n]+/).map(a => a.trim()).filter(a => a.length > 0);
+        if (addresses.length === 0) { showToast('Enter at least one address','error'); return; }
+
+        const base = {
           webhook_url: document.getElementById('fs-webhook').value,
           direction: document.getElementById('fs-direction').value,
           label: document.getElementById('fs-label').value || null
         };
         const chainVal = document.getElementById('fs-chain').value;
-        if (chainVal) body.chain_id = parseInt(chainVal);
+        if (chainVal) base.chain_id = parseInt(chainVal);
         const types = [];
         document.querySelectorAll('.fs-type-check:checked').forEach(c => types.push(c.value));
-        if (types.length > 0) body.transfer_types = types;
+        if (types.length > 0) base.transfer_types = types;
 
         try {
-          let url, method;
-          if (mode === 'add') { url = '/api/v1/subscriptions'; method = 'POST'; }
-          else { url = '/api/v1/subscriptions/' + mode.replace('edit-',''); method = 'PATCH'; }
-          const res = await fetch(url, { method, headers: {'Content-Type':'application/json'}, body: JSON.stringify(body) });
-          const data = await res.json();
-          if (res.ok) { closeSubModal(); showToast('Saved!','success'); setTimeout(()=>location.reload(),800); }
-          else { showToast((data.errors||[data.error]).join(', '),'error'); }
+          if (mode === 'add') {
+            // Bulk create
+            let ok = 0, errors = [];
+            for (const addr of addresses) {
+              const body = { ...base, address: addr };
+              const res = await fetch('/api/v1/subscriptions', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(body) });
+              if (res.ok) { ok++; } else { const d = await res.json(); errors.push(addr.substring(0,10)+'...: '+(d.errors||[d.error]).join(', ')); }
+            }
+            closeSubModal();
+            if (ok > 0) showToast(ok + ' subscription(s) created','success');
+            if (errors.length > 0) showToast(errors.join('; '),'error');
+            setTimeout(()=>location.reload(),800);
+          } else {
+            // Single edit
+            const body = { ...base, address: addresses[0] };
+            const url = '/api/v1/subscriptions/' + mode.replace('edit-','');
+            const res = await fetch(url, { method:'PATCH', headers:{'Content-Type':'application/json'}, body: JSON.stringify(body) });
+            const data = await res.json();
+            if (res.ok) { closeSubModal(); showToast('Saved!','success'); setTimeout(()=>location.reload(),800); }
+            else { showToast((data.errors||[data.error]).join(', '),'error'); }
+          }
         } catch(e) { showToast('Error: '+e.message,'error'); }
       }
 
