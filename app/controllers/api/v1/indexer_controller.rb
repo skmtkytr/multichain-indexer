@@ -92,6 +92,67 @@ module Api
 
         render json: stats
       end
+
+      # POST /api/v1/webhooks/dispatcher/start
+      def start_dispatcher
+        workflow_id = 'webhook-dispatcher'
+        begin
+          handle = TemporalClient.connection.workflow_handle(workflow_id)
+          handle.describe
+          return render json: { error: 'Dispatcher already running' }, status: :conflict
+        rescue StandardError
+          # Not running, good to start
+        end
+
+        handle = TemporalClient.connection.start_workflow(
+          Indexer::WebhookDispatcherWorkflow,
+          { 'poll_interval' => params.fetch(:poll_interval, 2).to_i },
+          id: workflow_id,
+          task_queue: ENV.fetch('TEMPORAL_TASK_QUEUE', 'evm-indexer')
+        )
+
+        render json: { status: 'started', workflow_id: handle.id }
+      end
+
+      # POST /api/v1/webhooks/dispatcher/stop
+      def stop_dispatcher
+        workflow_id = 'webhook-dispatcher'
+        begin
+          handle = TemporalClient.connection.workflow_handle(workflow_id)
+          handle.cancel
+          render json: { status: 'stopped' }
+        rescue StandardError
+          render json: { error: 'Dispatcher not running' }, status: :not_found
+        end
+      end
+
+      # GET /api/v1/webhooks/dispatcher/status
+      def dispatcher_status
+        workflow_id = 'webhook-dispatcher'
+        begin
+          handle = TemporalClient.connection.workflow_handle(workflow_id)
+          desc = handle.describe
+          pending = WebhookDelivery.pending.count
+          retryable = WebhookDelivery.retryable.count
+          unprocessed = AssetTransfer.where(webhook_processed: false).count
+
+          render json: {
+            status: desc.status.to_s,
+            workflow_id: workflow_id,
+            pending_deliveries: pending,
+            retryable_deliveries: retryable,
+            unprocessed_transfers: unprocessed,
+            total_subscriptions: AddressSubscription.active.count
+          }
+        rescue StandardError
+          render json: {
+            status: 'not_running',
+            pending_deliveries: WebhookDelivery.pending.count,
+            unprocessed_transfers: AssetTransfer.where(webhook_processed: false).count,
+            total_subscriptions: AddressSubscription.active.count
+          }
+        end
+      end
     end
   end
 end

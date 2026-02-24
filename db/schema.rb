@@ -10,9 +10,28 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.1].define(version: 2026_02_22_100006) do
+ActiveRecord::Schema[8.1].define(version: 2026_02_22_200003) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "pg_catalog.plpgsql"
+
+  create_table "address_subscriptions", force: :cascade do |t|
+    t.string "address", null: false
+    t.bigint "chain_id"
+    t.datetime "created_at", null: false
+    t.string "direction", default: "both", null: false
+    t.boolean "enabled", default: true, null: false
+    t.integer "failure_count", default: 0, null: false
+    t.string "label"
+    t.datetime "last_notified_at"
+    t.integer "max_failures", default: 10, null: false
+    t.string "secret", null: false
+    t.jsonb "transfer_types"
+    t.datetime "updated_at", null: false
+    t.string "webhook_url", null: false
+    t.index ["address", "chain_id"], name: "index_address_subscriptions_on_address_and_chain_id"
+    t.index ["address"], name: "index_address_subscriptions_on_address"
+    t.index ["enabled"], name: "index_address_subscriptions_on_enabled"
+  end
 
   create_table "asset_transfers", force: :cascade do |t|
     t.decimal "amount", precision: 78, null: false
@@ -30,12 +49,14 @@ ActiveRecord::Schema[8.1].define(version: 2026_02_22_100006) do
     t.string "transfer_type", null: false
     t.string "tx_hash", null: false
     t.datetime "updated_at", null: false
+    t.boolean "webhook_processed", default: false, null: false
     t.index ["chain_id", "block_number"], name: "index_asset_transfers_on_chain_id_and_block_number"
     t.index ["chain_id", "tx_hash", "transfer_type", "log_index", "trace_index"], name: "idx_asset_transfers_unique", unique: true
     t.index ["chain_id", "tx_hash"], name: "index_asset_transfers_on_chain_id_and_tx_hash"
     t.index ["from_address"], name: "index_asset_transfers_on_from_address"
     t.index ["to_address"], name: "index_asset_transfers_on_to_address"
     t.index ["token_address", "chain_id"], name: "index_asset_transfers_on_token_address_and_chain_id"
+    t.index ["webhook_processed"], name: "index_asset_transfers_on_webhook_processed", where: "(webhook_processed = false)"
   end
 
   create_table "chain_configs", force: :cascade do |t|
@@ -250,4 +271,26 @@ ActiveRecord::Schema[8.1].define(version: 2026_02_22_100006) do
     t.index ["chain_id", "block_number"], name: "index_utxo_transactions_on_chain_id_and_block_number"
     t.index ["chain_id", "txid"], name: "index_utxo_transactions_on_chain_id_and_txid", unique: true
   end
+
+  create_table "webhook_deliveries", force: :cascade do |t|
+    t.bigint "address_subscription_id", null: false
+    t.bigint "asset_transfer_id", null: false
+    t.integer "attempts", default: 0, null: false
+    t.datetime "created_at", null: false
+    t.integer "max_attempts", default: 8, null: false
+    t.datetime "next_retry_at"
+    t.text "response_body"
+    t.integer "response_code"
+    t.datetime "sent_at"
+    t.string "status", default: "pending", null: false
+    t.datetime "updated_at", null: false
+    t.index ["address_subscription_id", "asset_transfer_id"], name: "idx_webhook_deliveries_sub_transfer_uniq", unique: true
+    t.index ["address_subscription_id"], name: "index_webhook_deliveries_on_address_subscription_id"
+    t.index ["asset_transfer_id"], name: "index_webhook_deliveries_on_asset_transfer_id"
+    t.index ["next_retry_at"], name: "index_webhook_deliveries_on_next_retry_at"
+    t.index ["status"], name: "index_webhook_deliveries_on_status"
+  end
+
+  add_foreign_key "webhook_deliveries", "address_subscriptions"
+  add_foreign_key "webhook_deliveries", "asset_transfers"
 end

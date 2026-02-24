@@ -13,6 +13,17 @@ Rails.application.routes.draw do
       # Address monitoring
       get 'address_transfers', to: 'address_transfers#index'
 
+      # Webhook subscriptions
+      resources :subscriptions, only: %i[index show create update destroy] do
+        post :test, on: :member
+        get :deliveries, on: :member
+      end
+
+      # Webhook dispatcher control
+      post 'webhooks/dispatcher/start', to: 'indexer#start_dispatcher'
+      post 'webhooks/dispatcher/stop', to: 'indexer#stop_dispatcher'
+      get  'webhooks/dispatcher/status', to: 'indexer#dispatcher_status'
+
       # Chain management
       resources :chains, only: %i[index show create update destroy], param: :chain_id do
         post :test, on: :member

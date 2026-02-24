@@ -31,7 +31,8 @@ worker = Temporalio::Worker.new(
     Indexer::BlockPollerWorkflow,
     Indexer::BlockProcessorWorkflow,
     Indexer::UtxoBlockProcessorWorkflow,
-    Indexer::SubstrateBlockProcessorWorkflow
+    Indexer::SubstrateBlockProcessorWorkflow,
+    Indexer::WebhookDispatcherWorkflow
   ],
   activities: [
     Indexer::FetchBlockActivity,
@@ -41,7 +42,8 @@ worker = Temporalio::Worker.new(
     Indexer::DecodeTransfersActivity,
     Indexer::FetchTracesActivity,
     Indexer::UtxoFetchBlockActivity,
-    Indexer::SubstrateFetchBlockActivity
+    Indexer::SubstrateFetchBlockActivity,
+    Indexer::WebhookDispatchActivity
   ]
 )
 
