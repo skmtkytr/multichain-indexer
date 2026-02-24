@@ -25,7 +25,7 @@ class UtxoTransaction < ApplicationRecord
   end
 
   def tx_url
-    config = ChainConfig.find_by(chain_id: chain_id)
+    config = ChainConfig.cached_find(chain_id)
     return nil unless config&.explorer_url
     "#{config.explorer_url}/tx/#{txid}"
   end

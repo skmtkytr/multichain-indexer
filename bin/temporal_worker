@@ -37,8 +37,6 @@ workflows = [
 activities = [
   Indexer::FetchBlockActivity,
   Indexer::ProcessBlockActivity,
-  Indexer::ProcessTransactionActivity,
-  Indexer::ProcessLogActivity,
   Indexer::DecodeTransfersActivity,
   Indexer::FetchTracesActivity,
   Indexer::UtxoFetchBlockActivity,

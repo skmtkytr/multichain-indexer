@@ -49,15 +49,18 @@ class AssetTransfer < ApplicationRecord
     %w[erc721 erc1155].include?(transfer_type)
   end
 
+  def chain_config
+    @chain_config ||= ChainConfig.cached_find(chain_id)
+  end
+
   def formatted_amount
     return '🔒 Confidential' if confidential?
     return '1 NFT' if nft? && token_id.present?
     if native? || internal? || withdrawal? || mweb?
-      chain = ChainConfig.find_by(chain_id: chain_id)
-      if chain&.utxo?
-        return format_satoshi(amount, chain&.native_currency || 'BTC')
-      elsif chain&.substrate?
-        return format_planck(amount, chain&.native_currency || 'DOT')
+      if chain_config&.utxo?
+        return format_satoshi(amount, chain_config&.native_currency || 'BTC')
+      elsif chain_config&.substrate?
+        return format_planck(amount, chain_config&.native_currency || 'DOT')
       end
       return format_eth(amount)
     end
@@ -67,8 +70,7 @@ class AssetTransfer < ApplicationRecord
   end
 
   def token_symbol
-    chain = ChainConfig.find_by(chain_id: chain_id)
-    native = chain&.native_currency || 'ETH'
+    native = chain_config&.native_currency || 'ETH'
     return native if native? || internal? || withdrawal? || mweb?
     return token_contract.display_name if token_contract
     return 'Unknown' if token_address.present?
@@ -84,7 +86,6 @@ class AssetTransfer < ApplicationRecord
 
   def tx_url
     return nil if withdrawal? # pseudo tx_hash, not a real transaction
-    chain_config = ChainConfig.find_by(chain_id: chain_id)
     return nil unless chain_config&.explorer_url
     "#{chain_config.explorer_url}/tx/#{tx_hash}"
   end
@@ -92,9 +93,14 @@ class AssetTransfer < ApplicationRecord
   private
 
   def normalize_addresses
-    self.from_address = from_address&.downcase
-    self.to_address = to_address&.downcase
-    self.token_address = token_address&.downcase
+    # SS58 (Substrate) addresses are case-sensitive — only downcase EVM/UTXO
+    if chain_config&.substrate?
+      self.token_address = token_address&.downcase # token addresses are hex even on substrate
+    else
+      self.from_address = from_address&.downcase
+      self.to_address = to_address&.downcase
+      self.token_address = token_address&.downcase
+    end
   end
 
   def format_eth(wei)

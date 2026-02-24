@@ -42,9 +42,7 @@ module Indexer
 
         if @iterations_count >= max_iterations
           @dispatcher_status = 'continuing'
-          raise Temporalio::Workflow::ContinueAsNewError.new(
-            args: [params]
-          )
+          raise Temporalio::Workflow::ContinueAsNewError.new(params)
         end
 
         Temporalio::Workflow.sleep(poll_interval)

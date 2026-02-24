@@ -321,7 +321,7 @@ class DashboardController < ApplicationController
     delivered_count = WebhookDelivery.where(status: 'sent').count
 
     sub_rows = @subscriptions.map do |s|
-      chain_name = s.chain_id ? (ChainConfig.find_by(chain_id: s.chain_id)&.name || s.chain_id.to_s) : 'All'
+      chain_name = s.chain_id ? (ChainConfig.cached_find(s.chain_id)&.name || s.chain_id.to_s) : 'All'
       types = s.transfer_types&.join(', ') || 'All'
       <<~ROW
         <tr>

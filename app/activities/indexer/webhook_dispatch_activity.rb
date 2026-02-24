@@ -39,10 +39,12 @@ module Indexer
         scope = AssetTransfer.where('id > ?', last_transfer_id)
         scope = scope.where(chain_id: sub.chain_id) if sub.chain_id.present?
 
+        # Addresses are already normalized to lowercase on save (EVM/UTXO)
+        # Direct comparison uses the index; LOWER() would bypass it
         scope = case sub.direction
-                when 'incoming' then scope.where('LOWER(to_address) = ?', addr)
-                when 'outgoing' then scope.where('LOWER(from_address) = ?', addr)
-                else scope.where('LOWER(to_address) = ? OR LOWER(from_address) = ?', addr, addr)
+                when 'incoming' then scope.where(to_address: addr)
+                when 'outgoing' then scope.where(from_address: addr)
+                else scope.where('to_address = ? OR from_address = ?', addr, addr)
                 end
 
         scope = scope.where(transfer_type: sub.transfer_types) if sub.transfer_types.present?
@@ -110,7 +112,7 @@ module Indexer
 
     def build_payload(delivery)
       transfer = delivery.asset_transfer
-      chain = ChainConfig.find_by(chain_id: transfer.chain_id)
+      chain = ChainConfig.cached_find(transfer.chain_id)
 
       {
         event: 'asset_transfer',

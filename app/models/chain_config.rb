@@ -6,6 +6,31 @@ class ChainConfig < ApplicationRecord
   NETWORK_TYPES = %w[mainnet testnet devnet].freeze
   CHAIN_TYPES = %w[evm utxo substrate].freeze
 
+  # In-memory cache (11 chains max, refreshes every 60s)
+  CACHE_TTL = 60
+
+  def self.cached_all
+    if @cache_expires_at.nil? || @cache_expires_at < Time.current
+      @cached_configs = all.index_by(&:chain_id)
+      @cache_expires_at = Time.current + CACHE_TTL
+    end
+    @cached_configs
+  end
+
+  def self.cached_find(chain_id)
+    cached_all[chain_id.to_i]
+  end
+
+  def self.invalidate_cache!
+    @cache_expires_at = nil
+    @cached_configs = nil
+  end
+
+  after_commit :invalidate_cache
+  def invalidate_cache
+    self.class.invalidate_cache!
+  end
+
   validates :chain_id, presence: true, uniqueness: true
   validates :name, presence: true
   validates :rpc_url, presence: true, if: -> { evm? && rpc_endpoints.blank? }

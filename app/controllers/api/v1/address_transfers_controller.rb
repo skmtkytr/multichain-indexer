@@ -62,7 +62,7 @@ module Api
         token = t.token_contract
         native = t.native? || t.internal? || t.withdrawal?
         decimals = native ? 18 : token&.decimals
-        native_symbol = chain_native_symbol(t.chain_id)
+        native_symbol = ChainConfig.cached_find(t.chain_id)&.native_currency || 'ETH'
 
         {
           tx_hash: t.tx_hash,
@@ -94,16 +94,7 @@ module Api
         amount.to_s
       end
 
-      def chain_native_symbol(chain_id)
-        case chain_id
-        when 137 then "MATIC"
-        when 42161 then "ETH"  # Arbitrum
-        when 10 then "ETH"     # Optimism
-        when 56 then "BNB"
-        when 43114 then "AVAX"
-        else "ETH"
-        end
-      end
+      # Removed: chain_native_symbol hardcode — now uses ChainConfig.cached_find
     end
   end
 end

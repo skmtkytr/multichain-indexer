@@ -22,7 +22,7 @@ class SubstrateExtrinsic < ApplicationRecord
   end
 
   def tx_url
-    config = ChainConfig.find_by(chain_id: chain_id)
+    config = ChainConfig.cached_find(chain_id)
     return nil unless config&.explorer_url && extrinsic_hash
     "#{config.explorer_url}/extrinsic/#{extrinsic_hash}"
   end

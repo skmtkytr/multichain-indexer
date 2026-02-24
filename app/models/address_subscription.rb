@@ -18,7 +18,7 @@ class AddressSubscription < ApplicationRecord
     from = transfer.from_address&.downcase
     to = transfer.to_address&.downcase
 
-    subs = active.where('LOWER(address) IN (?)', [from, to].compact.uniq)
+    subs = active.where(address: [from, to].compact.uniq)
     subs = subs.where('chain_id IS NULL OR chain_id = ?', transfer.chain_id)
 
     subs.select do |sub|
@@ -42,9 +42,10 @@ class AddressSubscription < ApplicationRecord
   private
 
   def normalize_address
-    # Don't downcase substrate addresses (case-sensitive SS58)
-    # EVM and UTXO are case-insensitive
     self.address = address&.strip
+    # Substrate SS58 addresses are case-sensitive; EVM/UTXO are not
+    chain = chain_id.present? ? ChainConfig.cached_find(chain_id) : nil
+    self.address = address&.downcase unless chain&.substrate?
   end
 
   def generate_secret
