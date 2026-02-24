@@ -5,15 +5,25 @@ require 'temporalio/workflow'
 module Indexer
   # Long-running workflow that continuously polls for new blocks.
   # Uses continue-as-new to avoid unbounded history growth.
-  # Processes blocks in parallel batches for throughput.
+  #
+  # 2-Mode Architecture:
+  #   - Catch-up mode: when behind by > CATCHUP_THRESHOLD blocks, uses BatchFetchActivity
+  #     (single activity processes N blocks in a loop, no child WFs, max throughput)
+  #   - Live mode: when caught up, uses child workflows per block
+  #     (full processing: traces, token metadata, parallel batches)
   #
   # Signals: pause, resume
-  # Queries: current_block, poller_status
+  # Queries: current_block, poller_status, stats
   class BlockPollerWorkflow < Temporalio::Workflow::Definition
     workflow_query_attr_reader :current_block
     workflow_query_attr_reader :poller_status
 
     GET_LATEST_START_TO_CLOSE = 15
+    CATCHUP_THRESHOLD = 50           # switch to catch-up if behind by this many blocks
+    CATCHUP_BATCH_SIZE = 50          # blocks per BatchFetchActivity call
+    CATCHUP_ACTIVITY_TIMEOUT = 300   # 5 min per batch (50 blocks)
+    CATCHUP_HEARTBEAT_TIMEOUT = 30   # must heartbeat within 30s
+
     CHILD_WF_RETRY_POLICY = Temporalio::RetryPolicy.new(
       max_attempts: 3,
       initial_interval: 2,
@@ -29,10 +39,10 @@ module Indexer
       chain_type = params['chain_type'] || params[:chain_type] || 'evm'
 
       @current_block = start_block
-      @poller_status = 'polling'
+      @poller_status = 'initializing'
       @paused = false
       blocks_processed = 0
-      max_blocks_before_continue = 100
+      max_blocks_before_continue = 500  # higher for catch-up mode efficiency
 
       # Select the right activity/workflow based on chain type
       fetch_activity, processor_workflow = case chain_type
@@ -49,7 +59,6 @@ module Indexer
         if @paused
           @poller_status = 'paused'
           Temporalio::Workflow.wait_condition { !@paused }
-          @poller_status = 'polling'
         end
 
         # Fetch latest block number from chain
@@ -67,35 +76,86 @@ module Indexer
                  end
 
         if @current_block > latest
+          @poller_status = 'live_waiting'
           Temporalio::Workflow.sleep(poll_interval)
           next
         end
 
-        # Process blocks in parallel batches
-        end_block = [@current_block + blocks_per_batch - 1, latest].min
-        task_queue = Temporalio::Workflow.info.task_queue
+        gap = latest - @current_block
 
-        handles = (@current_block..end_block).map do |block_number|
-          Temporalio::Workflow.start_child_workflow(
-            processor_workflow,
-            { 'chain_id' => chain_id, 'block_number' => block_number },
-            id: "process-block-#{chain_id}-#{block_number}",
-            task_queue: task_queue,
-            retry_policy: CHILD_WF_RETRY_POLICY
-          )
-        end
+        if gap > CATCHUP_THRESHOLD
+          # ══════════════════════════════════════════════════
+          # CATCH-UP MODE: batch processing, max throughput
+          # ══════════════════════════════════════════════════
+          @poller_status = "catchup (#{gap} behind)"
 
-        handles.each do |handle|
-          begin
-            handle.result
-          rescue => e
-            Temporalio::Workflow.logger.error("Child workflow failed: #{e.message}")
+          end_block = [@current_block + CATCHUP_BATCH_SIZE - 1, latest].min
+
+          result = begin
+                     Temporalio::Workflow.execute_activity(
+                       Indexer::BatchFetchActivity,
+                       {
+                         'chain_id' => chain_id,
+                         'chain_type' => chain_type,
+                         'from_block' => @current_block,
+                         'to_block' => end_block
+                       },
+                       start_to_close_timeout: CATCHUP_ACTIVITY_TIMEOUT,
+                       heartbeat_timeout: CATCHUP_HEARTBEAT_TIMEOUT,
+                       retry_policy: Temporalio::RetryPolicy.new(
+                         max_attempts: 3,
+                         initial_interval: 5,
+                         backoff_coefficient: 2.0,
+                         max_interval: 60
+                       )
+                     )
+                   rescue => e
+                     Temporalio::Workflow.logger.error("Catch-up batch failed: #{e.message}")
+                     # Sleep and retry on next iteration
+                     Temporalio::Workflow.sleep(poll_interval * 3)
+                     next
+                   end
+
+          actual_processed = result['blocks_processed'] || 0
+          if actual_processed > 0
+            @current_block = (result['last_block'] || @current_block) + 1
+            blocks_processed += actual_processed
+          else
+            # Batch produced nothing — sleep and retry
+            Temporalio::Workflow.sleep(poll_interval * 3)
           end
-        end
 
-        batch_size = end_block - @current_block + 1
-        blocks_processed += batch_size
-        @current_block = end_block + 1
+        else
+          # ══════════════════════════════════════════════════
+          # LIVE MODE: child workflows, full processing
+          # ══════════════════════════════════════════════════
+          @poller_status = 'live'
+
+          end_block = [@current_block + blocks_per_batch - 1, latest].min
+          task_queue = Temporalio::Workflow.info.task_queue
+
+          handles = (@current_block..end_block).map do |block_number|
+            Temporalio::Workflow.start_child_workflow(
+              processor_workflow,
+              { 'chain_id' => chain_id, 'block_number' => block_number },
+              id: "process-block-#{chain_id}-#{block_number}",
+              task_queue: task_queue,
+              retry_policy: CHILD_WF_RETRY_POLICY
+            )
+          end
+
+          handles.each do |handle|
+            begin
+              handle.result
+            rescue => e
+              Temporalio::Workflow.logger.error("Child workflow failed: #{e.message}")
+            end
+          end
+
+          batch_size = end_block - @current_block + 1
+          blocks_processed += batch_size
+          @current_block = end_block + 1
+        end
       end
 
       # Continue-as-new to prevent history from growing unbounded
@@ -132,8 +192,6 @@ module Indexer
 
     workflow_signal
     def update_config(new_config)
-      # Allows runtime tuning without restart
-      # Supported keys: poll_interval_seconds, blocks_per_batch
       Temporalio::Workflow.logger.info("Config update signal received: #{new_config}")
     end
   end
