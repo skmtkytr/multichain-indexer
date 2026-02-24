@@ -22,71 +22,41 @@ module Indexer
 
     private
 
-    # Directly query transfers matching active subscriptions (no full scan)
+    # Query transfers matching active subscriptions since last delivery
     def scan_and_enqueue
       subs = AddressSubscription.active.to_a
       return { scanned: 0, enqueued: 0 } if subs.empty?
 
       enqueued = 0
-      scanned_ids = Set.new
 
       subs.each do |sub|
-        # Build query for this subscription's address
+        # Find where we left off for this subscription
+        last_delivery = WebhookDelivery.where(address_subscription_id: sub.id)
+                                       .order(asset_transfer_id: :desc).first
+        last_transfer_id = last_delivery&.asset_transfer_id || 0
+
         addr = sub.address.downcase
-        scope = AssetTransfer.where(webhook_processed: false)
+        scope = AssetTransfer.where('id > ?', last_transfer_id)
         scope = scope.where(chain_id: sub.chain_id) if sub.chain_id.present?
 
-        # Direction filter
         scope = case sub.direction
                 when 'incoming' then scope.where('LOWER(to_address) = ?', addr)
                 when 'outgoing' then scope.where('LOWER(from_address) = ?', addr)
                 else scope.where('LOWER(to_address) = ? OR LOWER(from_address) = ?', addr, addr)
                 end
 
-        # Transfer type filter
-        if sub.transfer_types.present?
-          scope = scope.where(transfer_type: sub.transfer_types)
-        end
+        scope = scope.where(transfer_type: sub.transfer_types) if sub.transfer_types.present?
 
-        transfers = scope.order(:id).limit(200)
-        transfers.each do |transfer|
-          scanned_ids << transfer.id
+        scope.order(:id).limit(200).each do |transfer|
           WebhookDelivery.find_or_create_by!(
             address_subscription: sub,
             asset_transfer: transfer
-          ) do |d|
-            d.status = 'pending'
-          end
+          ) { |d| d.status = 'pending' }
           enqueued += 1
         end
       end
 
-      # Mark matched transfers as processed
-      AssetTransfer.where(id: scanned_ids.to_a).update_all(webhook_processed: true) if scanned_ids.any?
-
-      # Also bulk-mark old unprocessed transfers that will never match
-      # (only mark transfers older than newest subscription's last check)
-      bulk_mark_unmatched
-
-      { scanned: scanned_ids.size, enqueued: enqueued }
-    end
-
-    # Periodically mark old unprocessed transfers to prevent unbounded growth
-    def bulk_mark_unmatched
-      # Mark up to 10000 old unprocessed transfers that don't match any subscription address
-      watched = AddressSubscription.active.pluck(:address).map(&:downcase).uniq
-      return if watched.empty?
-
-      # Just mark old ones in bulk — anything more than 1000 IDs behind the latest
-      latest_id = AssetTransfer.maximum(:id) || 0
-      cutoff_id = latest_id - 1000
-      return if cutoff_id <= 0
-
-      AssetTransfer
-        .where(webhook_processed: false)
-        .where('id < ?', cutoff_id)
-        .limit(10_000)
-        .update_all(webhook_processed: true)
+      { enqueued: enqueued }
     end
 
     # Deliver pending/retryable webhook deliveries

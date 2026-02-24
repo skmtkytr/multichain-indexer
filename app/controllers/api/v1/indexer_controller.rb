@@ -137,7 +137,6 @@ module Api
           desc = handle.describe
           pending = WebhookDelivery.pending.count
           retryable = WebhookDelivery.retryable.count
-          unprocessed = AssetTransfer.where(webhook_processed: false).count
 
           status_label = [1, 2].include?(desc.status) ? 'running' : 'stopped'
           render json: {

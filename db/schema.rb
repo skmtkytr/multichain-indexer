@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.1].define(version: 2026_02_22_200003) do
+ActiveRecord::Schema[8.1].define(version: 2026_02_24_000001) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "pg_catalog.plpgsql"
 
@@ -49,14 +49,12 @@ ActiveRecord::Schema[8.1].define(version: 2026_02_22_200003) do
     t.string "transfer_type", null: false
     t.string "tx_hash", null: false
     t.datetime "updated_at", null: false
-    t.boolean "webhook_processed", default: false, null: false
     t.index ["chain_id", "block_number"], name: "index_asset_transfers_on_chain_id_and_block_number"
     t.index ["chain_id", "tx_hash", "transfer_type", "log_index", "trace_index"], name: "idx_asset_transfers_unique", unique: true
     t.index ["chain_id", "tx_hash"], name: "index_asset_transfers_on_chain_id_and_tx_hash"
     t.index ["from_address"], name: "index_asset_transfers_on_from_address"
     t.index ["to_address"], name: "index_asset_transfers_on_to_address"
     t.index ["token_address", "chain_id"], name: "index_asset_transfers_on_token_address_and_chain_id"
-    t.index ["webhook_processed"], name: "index_asset_transfers_on_webhook_processed", where: "(webhook_processed = false)"
   end
 
   create_table "chain_configs", force: :cascade do |t|
