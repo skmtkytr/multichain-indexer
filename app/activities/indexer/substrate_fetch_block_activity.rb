@@ -43,6 +43,7 @@ module Indexer
       block_number = params['block_number']
 
       rpc = SubstrateRpc.new(chain_id: chain_id)
+      Temporalio::Activity::Context.current.heartbeat('rpc_fetch')
       block_data = rpc.fetch_full_block(block_number)
       return nil unless block_data
 
@@ -55,6 +56,7 @@ module Indexer
       event_records = []
       transfers = []
 
+      Temporalio::Activity::Context.current.heartbeat('db_store')
       ActiveRecord::Base.transaction do
         # Store block in indexed_blocks (reuse for unified dashboard)
         # Sidecar provides timestamp in first extrinsic (timestamp.set)

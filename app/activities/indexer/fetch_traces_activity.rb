@@ -16,6 +16,7 @@ module Indexer
       end
 
       rpc = EthereumRpc.new(chain_id: chain_id)
+      Temporalio::Activity::Context.current.heartbeat('trace_fetch')
       traces = rpc.trace_block(block_number_hex, chain_config.trace_method.presence)
       { 'traces' => traces, 'supported' => true }
     rescue StandardError => e

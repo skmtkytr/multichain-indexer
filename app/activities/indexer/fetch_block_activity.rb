@@ -73,6 +73,7 @@ module Indexer
 
       # 1. Fetch from RPC
       rpc = EthereumRpc.new(chain_id: chain_id)
+      Temporalio::Activity::Context.current.heartbeat('rpc_fetch')
       full_data = rpc.fetch_full_block(block_number, supports_block_receipts: supports_receipts)
 
       if full_data.nil?
@@ -130,6 +131,7 @@ module Indexer
       end
 
       # 3. Store in DB (single transaction)
+      Temporalio::Activity::Context.current.heartbeat('db_store')
       ActiveRecord::Base.transaction do
         IndexedBlock.upsert(
           {
@@ -153,6 +155,7 @@ module Indexer
       end
 
       # 4. Decode asset transfers (in-process, no Temporal roundtrip)
+      Temporalio::Activity::Context.current.heartbeat('decode_transfers')
       transfers = decode_transfers(chain_id, block_num, block_data['transactions'] || [], logs, block_data['withdrawals'] || [])
       token_addresses = transfers[:token_addresses]
 

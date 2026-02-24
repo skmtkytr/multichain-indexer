@@ -27,7 +27,6 @@ module Indexer
           Indexer::WebhookDispatchActivity,
           'scan_and_enqueue',
           start_to_close_timeout: 30,
-          schedule_to_close_timeout: 60,
           retry_policy: Temporalio::RetryPolicy.new(max_attempts: 3)
         )
 
@@ -36,7 +35,6 @@ module Indexer
           Indexer::WebhookDispatchActivity,
           'deliver_pending',
           start_to_close_timeout: 60,
-          schedule_to_close_timeout: 120,
           retry_policy: Temporalio::RetryPolicy.new(max_attempts: 2)
         )
 

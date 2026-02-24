@@ -31,12 +31,14 @@ module Indexer
       rpc = BitcoinRpc.new(chain_id: chain_id)
 
       # 1. Fetch block with verbosity=2 (full decoded txs)
+      Temporalio::Activity::Context.current.heartbeat('rpc_fetch')
       block = rpc.get_block(block_number, verbosity: 2)
       return nil unless block
 
       txs = block['tx'] || []
 
       # 2. Store block
+      Temporalio::Activity::Context.current.heartbeat('db_store')
       ActiveRecord::Base.transaction do
         IndexedBlock.upsert(
           {

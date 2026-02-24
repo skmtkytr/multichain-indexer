@@ -7,19 +7,15 @@ module Indexer
   # All heavy data stays inside the activity — only a small summary returns through Temporal gRPC.
   # This avoids the 4MB gRPC payload limit that Polygon/Arbitrum blocks can exceed.
   class BlockProcessorWorkflow < Temporalio::Workflow::Definition
-    # Timeouts: start_to_close = single attempt max, schedule_to_close = total with retries
-    FETCH_START_TO_CLOSE = 60      # single RPC+DB attempt
-    FETCH_SCHEDULE_TO_CLOSE = 300  # total with retries (~5 min)
+    FETCH_START_TO_CLOSE = 60       # single RPC+DB attempt
+    FETCH_HEARTBEAT_TIMEOUT = 30    # must heartbeat within 30s during long fetches
     TRACE_START_TO_CLOSE = 60
-    TRACE_SCHEDULE_TO_CLOSE = 120
     CURSOR_START_TO_CLOSE = 10
-    CURSOR_SCHEDULE_TO_CLOSE = 30
 
     def execute(params)
       chain_id = params['chain_id'] || params[:chain_id]
       block_number = params['block_number'] || params[:block_number]
 
-      # #3 Non-retryable errors: RPC method-not-found, invalid block, etc.
       retry_policy = Temporalio::RetryPolicy.new(
         max_attempts: 5,
         initial_interval: 1,
@@ -33,7 +29,7 @@ module Indexer
         Indexer::FetchBlockActivity,
         { 'action' => 'fetch_and_store', 'chain_id' => chain_id, 'block_number' => block_number },
         start_to_close_timeout: FETCH_START_TO_CLOSE,
-        schedule_to_close_timeout: FETCH_SCHEDULE_TO_CLOSE,
+        heartbeat_timeout: FETCH_HEARTBEAT_TIMEOUT,
         retry_policy: retry_policy
       )
 
@@ -46,7 +42,7 @@ module Indexer
           Indexer::FetchTracesActivity,
           { 'chain_id' => chain_id, 'block_number_hex' => block_number_hex },
           start_to_close_timeout: TRACE_START_TO_CLOSE,
-          schedule_to_close_timeout: TRACE_SCHEDULE_TO_CLOSE,
+          heartbeat_timeout: FETCH_HEARTBEAT_TIMEOUT,
           retry_policy: Temporalio::RetryPolicy.new(max_attempts: 2)
         )
 
@@ -60,7 +56,7 @@ module Indexer
               'traces' => trace_result['traces']
             },
             start_to_close_timeout: FETCH_START_TO_CLOSE,
-            schedule_to_close_timeout: FETCH_SCHEDULE_TO_CLOSE,
+            heartbeat_timeout: FETCH_HEARTBEAT_TIMEOUT,
             retry_policy: retry_policy
           )
         end
@@ -72,8 +68,7 @@ module Indexer
       Temporalio::Workflow.execute_activity(
         Indexer::ProcessBlockActivity,
         { 'action' => 'update_cursor', 'chain_id' => chain_id, 'block_number' => block_number },
-        start_to_close_timeout: CURSOR_START_TO_CLOSE,
-        schedule_to_close_timeout: CURSOR_SCHEDULE_TO_CLOSE
+        start_to_close_timeout: CURSOR_START_TO_CLOSE
       )
     end
   end

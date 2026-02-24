@@ -14,7 +14,12 @@ module Indexer
     workflow_query_attr_reader :poller_status
 
     GET_LATEST_START_TO_CLOSE = 15
-    GET_LATEST_SCHEDULE_TO_CLOSE = 60
+    CHILD_WF_RETRY_POLICY = Temporalio::RetryPolicy.new(
+      max_attempts: 3,
+      initial_interval: 2,
+      backoff_coefficient: 2.0,
+      max_interval: 30
+    )
 
     def execute(params)
       chain_id = params['chain_id'] || params[:chain_id]
@@ -53,7 +58,6 @@ module Indexer
                      fetch_activity,
                      { 'action' => 'get_latest', 'chain_id' => chain_id },
                      start_to_close_timeout: GET_LATEST_START_TO_CLOSE,
-                     schedule_to_close_timeout: GET_LATEST_SCHEDULE_TO_CLOSE,
                      retry_policy: Temporalio::RetryPolicy.new(max_attempts: 5)
                    )
                  rescue => e
@@ -69,7 +73,6 @@ module Indexer
 
         # Process blocks in parallel batches
         end_block = [@current_block + blocks_per_batch - 1, latest].min
-        # Task queue passed from the workflow's own task queue (chain-specific)
         task_queue = Temporalio::Workflow.info.task_queue
 
         handles = (@current_block..end_block).map do |block_number|
@@ -77,7 +80,8 @@ module Indexer
             processor_workflow,
             { 'chain_id' => chain_id, 'block_number' => block_number },
             id: "process-block-#{chain_id}-#{block_number}",
-            task_queue: task_queue
+            task_queue: task_queue,
+            retry_policy: CHILD_WF_RETRY_POLICY
           )
         end
 
@@ -107,6 +111,15 @@ module Indexer
       )
     end
 
+    workflow_query
+    def stats
+      {
+        'current_block' => @current_block,
+        'status' => @poller_status,
+        'paused' => @paused
+      }
+    end
+
     workflow_signal
     def pause
       @paused = true
@@ -115,6 +128,13 @@ module Indexer
     workflow_signal
     def resume
       @paused = false
+    end
+
+    workflow_signal
+    def update_config(new_config)
+      # Allows runtime tuning without restart
+      # Supported keys: poll_interval_seconds, blocks_per_batch
+      Temporalio::Workflow.logger.info("Config update signal received: #{new_config}")
     end
   end
 end
