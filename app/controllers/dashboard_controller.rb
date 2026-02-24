@@ -318,7 +318,7 @@ class DashboardController < ApplicationController
       false
     end
     pending_count = WebhookDelivery.pending.count
-    unprocessed_count = AssetTransfer.where(webhook_processed: false).count
+    delivered_count = WebhookDelivery.where(status: 'sent').count
 
     sub_rows = @subscriptions.map do |s|
       chain_name = s.chain_id ? (ChainConfig.find_by(chain_id: s.chain_id)&.name || s.chain_id.to_s) : 'All'
@@ -371,8 +371,8 @@ class DashboardController < ApplicationController
           <div class="stat-label">Pending Deliveries</div>
         </div>
         <div class="stat-card">
-          <div class="stat-value">#{unprocessed_count}</div>
-          <div class="stat-label">Unprocessed Transfers</div>
+          <div class="stat-value">#{delivered_count}</div>
+          <div class="stat-label">Delivered</div>
         </div>
       </div>
 

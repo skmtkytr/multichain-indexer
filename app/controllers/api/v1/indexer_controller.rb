@@ -98,10 +98,13 @@ module Api
         workflow_id = 'webhook-dispatcher'
         begin
           handle = TemporalClient.connection.workflow_handle(workflow_id)
-          handle.describe
-          return render json: { error: 'Dispatcher already running' }, status: :conflict
+          desc = handle.describe
+          # status 1 = RUNNING, 2 = CONTINUED_AS_NEW — anything else is not active
+          if [1, 2].include?(desc.status)
+            return render json: { error: 'Dispatcher already running' }, status: :conflict
+          end
         rescue StandardError
-          # Not running, good to start
+          # Not found, good to start
         end
 
         handle = TemporalClient.connection.start_workflow(
@@ -136,19 +139,18 @@ module Api
           retryable = WebhookDelivery.retryable.count
           unprocessed = AssetTransfer.where(webhook_processed: false).count
 
+          status_label = [1, 2].include?(desc.status) ? 'running' : 'stopped'
           render json: {
-            status: desc.status.to_s,
+            status: status_label,
             workflow_id: workflow_id,
             pending_deliveries: pending,
             retryable_deliveries: retryable,
-            unprocessed_transfers: unprocessed,
             total_subscriptions: AddressSubscription.active.count
           }
         rescue StandardError
           render json: {
             status: 'not_running',
             pending_deliveries: WebhookDelivery.pending.count,
-            unprocessed_transfers: AssetTransfer.where(webhook_processed: false).count,
             total_subscriptions: AddressSubscription.active.count
           }
         end
