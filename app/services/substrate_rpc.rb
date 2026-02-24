@@ -23,6 +23,12 @@ class SubstrateRpc
     result['number'].to_i(16)
   end
 
+  def get_finalized_block_number
+    hash = substrate_rpc_call('chain_getFinalizedHead')
+    header = substrate_rpc_call('chain_getHeader', [hash])
+    header['number'].to_i(16)
+  end
+
   # Fetch full block data via Sidecar REST API (decoded extrinsics + events)
   def get_block(height)
     sidecar_get("/blocks/#{height}")

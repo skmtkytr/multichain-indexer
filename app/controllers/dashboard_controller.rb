@@ -682,6 +682,22 @@ class DashboardController < ApplicationController
             </div>
             <div class="form-row">
               <div class="form-group">
+                <label class="form-label">Block Tag (Finality)</label>
+                <select class="form-input" id="f-block-tag">
+                  <option value="finalized">Finalized</option>
+                  <option value="safe">Safe</option>
+                  <option value="latest">Latest</option>
+                </select>
+                <div class="form-hint">EVM: finalized/safe/latest. UTXO/Substrate: finalized recommended.</div>
+              </div>
+              <div class="form-group">
+                <label class="form-label">Confirmation Blocks</label>
+                <input class="form-input" id="f-confirm-blocks" type="number" value="0">
+                <div class="form-hint">Fallback for tag=latest or UTXO (default: 6 for Bitcoin)</div>
+              </div>
+            </div>
+            <div class="form-row">
+              <div class="form-group">
                 <div class="form-check">
                   <input type="checkbox" id="f-enabled" checked>
                   <label class="form-label" for="f-enabled" style="margin:0">Enabled</label>
@@ -816,6 +832,8 @@ class DashboardController < ApplicationController
         document.getElementById('f-block-time').value = '12000';
         document.getElementById('f-poll-interval').value = '2';
         document.getElementById('f-batch-size').value = '10';
+        document.getElementById('f-block-tag').value = 'finalized';
+        document.getElementById('f-confirm-blocks').value = '0';
         document.getElementById('f-enabled').checked = true;
         document.getElementById('f-supports-trace').checked = false;
         onChainTypeChange();
@@ -844,6 +862,8 @@ class DashboardController < ApplicationController
           document.getElementById('f-block-time').value = c.block_time_ms;
           document.getElementById('f-poll-interval').value = c.poll_interval_seconds;
           document.getElementById('f-batch-size').value = c.blocks_per_batch;
+          document.getElementById('f-block-tag').value = c.block_tag || 'finalized';
+          document.getElementById('f-confirm-blocks').value = c.confirmation_blocks || 0;
           document.getElementById('f-enabled').checked = c.enabled;
           document.getElementById('f-supports-trace').checked = c.supports_trace || false;
           onChainTypeChange();
@@ -873,6 +893,8 @@ class DashboardController < ApplicationController
         body.block_time_ms = parseInt(document.getElementById('f-block-time').value);
         body.poll_interval_seconds = parseInt(document.getElementById('f-poll-interval').value);
         body.blocks_per_batch = parseInt(document.getElementById('f-batch-size').value);
+        body.block_tag = document.getElementById('f-block-tag').value;
+        body.confirmation_blocks = parseInt(document.getElementById('f-confirm-blocks').value) || 0;
         body.enabled = document.getElementById('f-enabled').checked;
         body.supports_trace = document.getElementById('f-supports-trace').checked;
 
@@ -1066,6 +1088,7 @@ class DashboardController < ApplicationController
           <div class="chain-card-row"><span class="chain-card-label">Block Time</span><span class="chain-card-value">#{c.block_time_ms}ms</span></div>
           <div class="chain-card-row"><span class="chain-card-label">Poll Interval</span><span class="chain-card-value">#{c.poll_interval_seconds}s</span></div>
           <div class="chain-card-row"><span class="chain-card-label">Batch Size</span><span class="chain-card-value">#{c.blocks_per_batch}</span></div>
+          <div class="chain-card-row"><span class="chain-card-label">Finality</span><span class="chain-card-value">#{c.block_tag}#{c.confirmation_blocks.to_i > 0 ? " (#{c.confirmation_blocks} confirms)" : ''}</span></div>
           <div class="chain-card-row"><span class="chain-card-label">Status</span><span class="chain-card-value"><span class="dot #{status}" style="display:inline-block;margin-right:4px"></span>#{status}</span></div>
           <div class="chain-card-row"><span class="chain-card-label">Last Block</span><span class="chain-card-value">#{format_number(cursor&.last_indexed_block || 0)}</span></div>
         </div>

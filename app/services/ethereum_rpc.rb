@@ -22,9 +22,17 @@ class EthereumRpc
     @batch_limit = 10
   end
 
-  def get_block_number
-    result = call_with_fallback("eth_blockNumber")
-    result.to_i(16)
+  # Get latest block number (any tag: "latest", "finalized", "safe")
+  def get_block_number(tag: 'latest')
+    if tag == 'latest'
+      result = call_with_fallback("eth_blockNumber")
+      result.to_i(16)
+    else
+      # Use eth_getBlockByNumber with the tag to get finalized/safe block
+      block = call_with_fallback("eth_getBlockByNumber", [tag, false])
+      return nil unless block
+      block["number"].to_i(16)
+    end
   end
 
   def get_block_by_number(number, full_transactions: true)

@@ -26,7 +26,15 @@ module Api
               when 'substrate' then SubstrateRpc.new(chain_id: chain_id)
               else EthereumRpc.new(chain_id: chain_id)
               end
-        latest_block = chain_config.utxo? ? rpc.get_block_count : rpc.get_block_number
+        latest_block = case chain_config.chain_type
+                       when 'utxo'
+                         tip = rpc.get_block_count
+                         [tip - (chain_config.confirmation_blocks || 6), 0].max
+                       when 'substrate'
+                         chain_config.block_tag == 'finalized' ? rpc.get_finalized_block_number : rpc.get_block_number
+                       else
+                         rpc.get_block_number(tag: chain_config.block_tag || 'finalized') || rpc.get_block_number
+                       end
 
         from_block = if start_block.present?
                        start_block == 'latest' ? latest_block : start_block.to_i

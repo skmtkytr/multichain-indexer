@@ -10,8 +10,11 @@ module Indexer
 
       case action
       when 'get_latest'
+        config = ChainConfig.find_by(chain_id: chain_id)
         rpc = BitcoinRpc.new(chain_id: chain_id)
-        rpc.get_block_count
+        tip = rpc.get_block_count
+        confirmations = config&.confirmation_blocks || 6
+        [tip - confirmations, 0].max
 
       when 'fetch_and_store'
         fetch_and_store(params)

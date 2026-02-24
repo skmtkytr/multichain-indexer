@@ -87,7 +87,7 @@ module Api
           :explorer_url, :native_currency, :block_time_ms,
           :poll_interval_seconds, :blocks_per_batch,
           :max_rpc_batch_size, :enabled, :network_type,
-          :supports_trace
+          :supports_trace, :block_tag, :confirmation_blocks
         )
         # Accept rpc_endpoints as JSON array
         if params[:rpc_endpoints].is_a?(Array)
@@ -117,6 +117,8 @@ module Api
           sidecar_url: mask ? mask_url(chain.sidecar_url) : chain.sidecar_url,
           supports_trace: chain.supports_trace,
           trace_method: chain.trace_method,
+          block_tag: chain.block_tag,
+          confirmation_blocks: chain.confirmation_blocks,
           status: chain.status,
           last_indexed_block: chain.last_indexed_block
         }

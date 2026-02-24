@@ -20,8 +20,16 @@ module Indexer
 
       case action
       when 'get_latest'
+        config = ChainConfig.find_by(chain_id: chain_id)
         rpc = SubstrateRpc.new(chain_id: chain_id)
-        rpc.get_block_number
+        tag = config&.block_tag || 'finalized'
+        if tag == 'finalized'
+          rpc.get_finalized_block_number
+        else
+          block_num = rpc.get_block_number
+          confirmations = config&.confirmation_blocks || 0
+          [block_num - confirmations, 0].max
+        end
 
       when 'fetch_and_store'
         fetch_and_store(params)

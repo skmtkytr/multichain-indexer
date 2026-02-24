@@ -19,8 +19,19 @@ module Indexer
 
       case action
       when 'get_latest'
+        config = ChainConfig.find_by(chain_id: chain_id)
         rpc = EthereumRpc.new(chain_id: chain_id)
-        rpc.get_block_number
+        tag = config&.block_tag || 'finalized'
+        block_num = rpc.get_block_number(tag: tag)
+
+        # Fallback: if finalized/safe returns nil (unsupported), use latest - confirmation_blocks
+        if block_num.nil?
+          latest = rpc.get_block_number(tag: 'latest')
+          confirmations = config&.confirmation_blocks || 0
+          block_num = [latest - confirmations, 0].max
+        end
+
+        block_num
 
       when 'fetch_and_store'
         # Combined: fetch from RPC + store to DB in one activity.
