@@ -19,7 +19,7 @@ module Indexer
   # Returns: { 'blocks_processed' => N, 'last_block' => M }
   class BatchFetchActivity < Temporalio::Activity::Definition
 
-    CONCURRENCY = 5  # parallel RPC fetch threads
+    CONCURRENCY = 2  # parallel RPC fetch threads (keep low to avoid provider rate limits)
 
     def execute(params)
       chain_id = params['chain_id']
