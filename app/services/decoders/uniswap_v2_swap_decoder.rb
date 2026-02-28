@@ -96,8 +96,7 @@ module Decoders
     def self.auto_register_v2_pool(chain_id, pool_address)
       rpc = EthereumRpc.new(chain_id: chain_id)
 
-      # token0(): 0x0dfe1681
-      # token1(): 0xd21220a7
+      # token0(): 0x0dfe1681, token1(): 0xd21220a7, symbol(): 0x95d89b41
       results = rpc.batch_call([
         { method: 'eth_call', params: [{ to: pool_address, data: '0x0dfe1681' }, 'latest'] },
         { method: 'eth_call', params: [{ to: pool_address, data: '0xd21220a7' }, 'latest'] }
@@ -112,18 +111,52 @@ module Decoders
       token0 = "0x#{token0_raw[-40..]}".downcase
       token1 = "0x#{token1_raw[-40..]}".downcase
 
+      # Fetch symbols for both tokens
+      sym0, sym1 = fetch_token_symbols(rpc, token0, token1)
+
       pool = DexPool.create!(
         chain_id: chain_id,
         pool_address: pool_address,
         dex_name: DEX_NAME,
         token0_address: token0,
-        token1_address: token1
+        token1_address: token1,
+        token0_symbol: sym0,
+        token1_symbol: sym1
       )
 
-      Rails.logger.info("Auto-registered V2 pool: #{pool_address} (#{token0}/#{token1})")
+      Rails.logger.info("Auto-registered V2 pool: #{pool_address} (#{sym0 || token0}/#{sym1 || token1})")
       pool
     rescue StandardError => e
       Rails.logger.debug("Failed to auto-register V2 pool #{pool_address}: #{e.message}")
+      nil
+    end
+
+    # Fetch ERC-20 symbol() for two token addresses
+    def self.fetch_token_symbols(rpc, token0, token1)
+      results = rpc.batch_call([
+        { method: 'eth_call', params: [{ to: token0, data: '0x95d89b41' }, 'latest'] },
+        { method: 'eth_call', params: [{ to: token1, data: '0x95d89b41' }, 'latest'] }
+      ])
+      [decode_string_result(results&.dig(0)), decode_string_result(results&.dig(1))]
+    rescue StandardError
+      [nil, nil]
+    end
+
+    # Decode ABI-encoded string return value
+    def self.decode_string_result(hex)
+      return nil unless hex.is_a?(String) && hex.length > 2
+      raw = [hex.sub(/\A0x/, '')].pack('H*')
+      return nil if raw.length < 64
+
+      offset = raw[0, 32].unpack1('H*').to_i(16)
+      return nil if offset + 32 > raw.length
+
+      len = raw[offset, 32].unpack1('H*').to_i(16)
+      return nil if len == 0 || len > 100 || offset + 32 + len > raw.length
+
+      result = raw[offset + 32, len].force_encoding('UTF-8')
+      result.valid_encoding? ? result : nil
+    rescue StandardError
       nil
     end
   end

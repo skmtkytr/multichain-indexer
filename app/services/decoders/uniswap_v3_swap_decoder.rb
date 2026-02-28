@@ -114,16 +114,21 @@ module Decoders
       token1 = "0x#{token1_raw[-40..]}".downcase
       fee = fee_raw.is_a?(String) ? fee_raw.to_i(16) : nil
 
+      # Fetch symbols
+      sym0, sym1 = Decoders::UniswapV2SwapDecoder.fetch_token_symbols(rpc, token0, token1)
+
       pool = DexPool.create!(
         chain_id: chain_id,
         pool_address: pool_address,
         dex_name: DEX_NAME,
         token0_address: token0,
         token1_address: token1,
+        token0_symbol: sym0,
+        token1_symbol: sym1,
         fee_tier: fee
       )
 
-      Rails.logger.info("Auto-registered V3 pool: #{pool_address} (#{token0}/#{token1}) fee=#{fee}")
+      Rails.logger.info("Auto-registered V3 pool: #{pool_address} (#{sym0 || token0}/#{sym1 || token1}) fee=#{fee}")
       pool
     rescue StandardError => e
       Rails.logger.debug("Failed to auto-register V3 pool #{pool_address}: #{e.message}")
