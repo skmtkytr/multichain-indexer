@@ -13,6 +13,10 @@ class DashboardController < ApplicationController
     @asset_transfers = AssetTransfer.by_chain(chain_id).recent.limit(20)
     @token_contracts = TokenContract.by_chain(chain_id).limit(20)
 
+    @dex_swaps = DexSwap.where(chain_id: chain_id).order(id: :desc).limit(20)
+    @arb_opportunities = ArbOpportunity.where(chain_id: chain_id).order(id: :desc).limit(20)
+    @dex_pools_count = DexPool.where(chain_id: chain_id).count
+
     @stats = {
       chain_id: chain_id,
       status: @cursor&.status || 'not_initialized',
@@ -22,7 +26,10 @@ class DashboardController < ApplicationController
       transactions_count: fast_count('indexed_transactions', chain_id),
       logs_count: fast_count('indexed_logs', chain_id),
       transfers_count: fast_count('asset_transfers', chain_id),
-      tokens_count: fast_count('token_contracts', chain_id)
+      tokens_count: fast_count('token_contracts', chain_id),
+      swaps_count: fast_count('dex_swaps', chain_id),
+      arb_count: fast_count('arb_opportunities', chain_id),
+      pools_count: @dex_pools_count
     }
 
     @page = params.fetch(:page, 'overview')
@@ -64,6 +71,7 @@ class DashboardController < ApplicationController
               when 'tokens' then tokens_page
               when 'address' then address_page
               when 'webhooks' then webhooks_page
+              when 'dex' then dex_page
               else overview_page
               end
             }
@@ -230,6 +238,7 @@ class DashboardController < ApplicationController
         <a class="nav-item #{@page == 'transfers' ? 'active' : ''}" href="/?page=transfers&chain_id=#{@stats[:chain_id]}">💸 Asset Transfers</a>
         <a class="nav-item #{@page == 'tokens' ? 'active' : ''}" href="/?page=tokens&chain_id=#{@stats[:chain_id]}">🪙 Token Contracts</a>
         <a class="nav-item #{@page == 'address' ? 'active' : ''}" href="/?page=address&chain_id=#{@stats[:chain_id]}">🔍 Address Lookup</a>
+        <a class="nav-item #{@page == 'dex' ? 'active' : ''}" href="/?page=dex&chain_id=#{@stats[:chain_id]}">📈 DEX & Arbitrage</a>
         <a class="nav-item #{@page == 'webhooks' ? 'active' : ''}" href="/?page=webhooks">🔔 Webhooks</a>
         <a class="nav-item #{@page == 'chains' ? 'active' : ''}" href="/?page=chains">⚙️ Chain Config</a>
 
@@ -280,6 +289,14 @@ class DashboardController < ApplicationController
         <div class="stat-card">
           <div class="stat-label">Token Contracts</div>
           <div class="stat-value">#{format_number(@stats[:tokens_count])}</div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-label">DEX Swaps</div>
+          <div class="stat-value">#{format_number(@stats[:swaps_count])}</div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-label">Arb Opportunities</div>
+          <div class="stat-value">#{format_number(@stats[:arb_count])}</div>
         </div>
       </div>
 
@@ -1304,6 +1321,116 @@ class DashboardController < ApplicationController
       "<tr><td>#{link_address(token.address)}</td><td>#{name_display}</td><td>#{standard_badge}</td><td class=\"num\">#{decimals_display}</td><td class=\"num\">#{format_number(transfer_count)}</td></tr>"
     end.join
     "<table><thead><tr><th>Contract Address</th><th>Name</th><th>Standard</th><th>Decimals</th><th>Transfers</th></tr></thead><tbody>#{rows}</tbody></table>"
+  end
+
+  def dex_page
+    arb_rows = @arb_opportunities.map do |a|
+      pool_buy = DexPool.find_by(chain_id: a.chain_id, pool_address: a.pool_buy)
+      pool_sell = DexPool.find_by(chain_id: a.chain_id, pool_address: a.pool_sell)
+      token0 = pool_buy&.token0_symbol || pool_buy&.token0_address&.then { |addr| truncate_hash(addr) } || '?'
+      token1 = pool_buy&.token1_symbol || pool_buy&.token1_address&.then { |addr| truncate_hash(addr) } || '?'
+
+      spread_color = if a.spread_bps.to_f >= 100
+                       '#3fb950'
+                     elsif a.spread_bps.to_f >= 30
+                       '#d29922'
+                     else
+                       '#8b949e'
+                     end
+
+      "<tr><td>#{link_block(a.block_number)}</td>" \
+      "<td><span style=\"color:#{spread_color};font-weight:600\">#{a.spread_bps.to_f.round(1)} bps</span></td>" \
+      "<td>#{h token0}/#{h token1}</td>" \
+      "<td>#{h a.dex_buy || '?'}</td>" \
+      "<td>#{h a.dex_sell || '?'}</td>" \
+      "<td class=\"num\">#{a.price_buy&.round(4)}</td>" \
+      "<td class=\"num\">#{a.price_sell&.round(4)}</td>" \
+      "<td>#{h a.arb_type}</td></tr>"
+    end.join
+
+    swap_rows = @dex_swaps.map do |s|
+      pool = DexPool.cached_find(s.chain_id, s.pool_address)
+      t_in = resolve_token_symbol(pool, s.token_in)
+      t_out = resolve_token_symbol(pool, s.token_out)
+
+      "<tr><td>#{link_block(s.block_number)}</td>" \
+      "<td>#{link_tx(s.tx_hash)}</td>" \
+      "<td>#{h s.dex_name || '?'}</td>" \
+      "<td>#{link_address(s.pool_address)}</td>" \
+      "<td><span style=\"color:#f85149\">#{h t_in}</span> → <span style=\"color:#3fb950\">#{h t_out}</span></td>" \
+      "<td class=\"num\" title=\"#{s.amount_in}\">#{format_swap_amount(s.amount_in)}</td>" \
+      "<td class=\"num\" title=\"#{s.amount_out}\">#{format_swap_amount(s.amount_out)}</td></tr>"
+    end.join
+
+    <<~HTML
+      <div class="page-header">
+        <div>
+          <div class="page-title">📈 DEX Swaps & Arbitrage</div>
+          <div class="page-subtitle">Chain ID: #{@stats[:chain_id]} · #{format_number(@stats[:pools_count])} pools · #{format_number(@stats[:swaps_count])} swaps · #{format_number(@stats[:arb_count])} opportunities</div>
+        </div>
+        <button class="btn btn-refresh" onclick="location.reload()">↻ Refresh</button>
+      </div>
+
+      <div class="stats-grid">
+        <div class="stat-card">
+          <div class="stat-label">DEX Pools</div>
+          <div class="stat-value">#{format_number(@stats[:pools_count])}</div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-label">Total Swaps</div>
+          <div class="stat-value">#{format_number(@stats[:swaps_count])}</div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-label">Arb Opportunities</div>
+          <div class="stat-value">#{format_number(@stats[:arb_count])}</div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-label">Avg Spread (last 20)</div>
+          <div class="stat-value">#{@arb_opportunities.any? ? ('%.1f' % (@arb_opportunities.map { |a| a.spread_bps.to_f }.sum / @arb_opportunities.size)) + ' bps' : '—'}</div>
+        </div>
+      </div>
+
+      <div class="section">
+        <h3>🎯 Recent Arbitrage Opportunities</h3>
+        #{arb_rows.empty? ? '<div class="empty">No arbitrage opportunities detected yet</div>' : "
+        <table>
+          <thead><tr><th>Block</th><th>Spread</th><th>Pair</th><th>Buy @</th><th>Sell @</th><th>Price Buy</th><th>Price Sell</th><th>Type</th></tr></thead>
+          <tbody>#{arb_rows}</tbody>
+        </table>"}
+      </div>
+
+      <div class="section">
+        <h3>🔄 Recent DEX Swaps</h3>
+        #{swap_rows.empty? ? '<div class="empty">No DEX swaps detected yet</div>' : "
+        <table>
+          <thead><tr><th>Block</th><th>Tx</th><th>DEX</th><th>Pool</th><th>Swap</th><th>Amount In</th><th>Amount Out</th></tr></thead>
+          <tbody>#{swap_rows}</tbody>
+        </table>"}
+      </div>
+    HTML
+  end
+
+  def resolve_token_symbol(pool, token_address)
+    return token_address&.then { |a| truncate_hash(a) } || '?' unless pool
+    if token_address == pool.token0_address
+      pool.token0_symbol || truncate_hash(token_address)
+    elsif token_address == pool.token1_address
+      pool.token1_symbol || truncate_hash(token_address)
+    else
+      token_address&.then { |a| truncate_hash(a) } || '?'
+    end
+  end
+
+  def format_swap_amount(amount)
+    return '0' if amount.nil?
+    n = amount.to_i
+    if n > 10**18
+      '%.4f' % (n.to_f / 10**18)
+    elsif n > 10**6
+      '%.2f' % (n.to_f / 10**6)
+    else
+      format_number(n)
+    end
   end
 
   def address_page
