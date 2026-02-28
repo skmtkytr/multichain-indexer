@@ -214,23 +214,49 @@ class EthereumRpc
   NON_RETRYABLE_CODES = [-32601, -32602].freeze
   NON_RETRYABLE_PATTERNS = /method not found|does not exist|invalid argument|invalid block number/i
 
-  # Single JSON-RPC call to a specific URL
+  # Rate-limit error code from providers like Chainstack
+  RATE_LIMIT_CODE = -32005
+  RATE_LIMIT_PATTERN = /exceeded the RPS limit|rate limit|too many requests/i
+  RATE_LIMIT_MAX_RETRIES = 5
+  RATE_LIMIT_BASE_DELAY = 0.3  # seconds
+
+  # Single JSON-RPC call to a specific URL (with rate-limit backoff)
   def call_single(rpc_url, method, params = [])
-    @request_id += 1
-    body = { jsonrpc: "2.0", method: method, params: params, id: @request_id }.to_json
+    retries = 0
 
-    response_body = http_post(rpc_url, body)
-    parsed = JSON.parse(response_body)
+    loop do
+      @request_id += 1
+      body = { jsonrpc: "2.0", method: method, params: params, id: @request_id }.to_json
 
-    if parsed["error"]
-      msg = parsed["error"]["message"]
-      code = parsed["error"]["code"]
-      if NON_RETRYABLE_CODES.include?(code) || msg&.match?(NON_RETRYABLE_PATTERNS)
-        raise NonRetryableError, "#{method}: #{msg} (code: #{code})"
+      response_body = http_post(rpc_url, body)
+      parsed = JSON.parse(response_body)
+
+      if parsed["error"]
+        msg = parsed["error"]["message"]
+        code = parsed["error"]["code"]
+
+        if NON_RETRYABLE_CODES.include?(code) || msg&.match?(NON_RETRYABLE_PATTERNS)
+          raise NonRetryableError, "#{method}: #{msg} (code: #{code})"
+        end
+
+        # Rate limit — backoff and retry
+        if code == RATE_LIMIT_CODE || msg&.match?(RATE_LIMIT_PATTERN)
+          retries += 1
+          raise RpcError, msg if retries > RATE_LIMIT_MAX_RETRIES
+
+          # Use try_again_in from response if available, otherwise exponential backoff
+          delay = parsed.dig("error", "data", "try_again_in")&.then { |d| d.to_f / 1000.0 }
+          delay ||= RATE_LIMIT_BASE_DELAY * (2 ** (retries - 1))
+          delay = [delay, 5.0].min  # cap at 5s
+          sleep(delay)
+          next
+        end
+
+        raise RpcError, msg
       end
-      raise RpcError, msg
+
+      return parsed["result"]
     end
-    parsed["result"]
   end
 
   # Raw HTTP POST
