@@ -1341,8 +1341,8 @@ class DashboardController < ApplicationController
       "<tr><td>#{link_block(a.block_number)}</td>" \
       "<td><span style=\"color:#{spread_color};font-weight:600\">#{a.spread_bps.to_f.round(1)} bps</span></td>" \
       "<td>#{h token0}/#{h token1}</td>" \
-      "<td>#{h a.dex_buy || '?'}</td>" \
-      "<td>#{h a.dex_sell || '?'}</td>" \
+      "<td>#{h a.dex_buy || '?'} #{a.tx_hash_buy ? link_tx(a.tx_hash_buy) : ''}</td>" \
+      "<td>#{h a.dex_sell || '?'} #{a.tx_hash_sell ? link_tx(a.tx_hash_sell) : ''}</td>" \
       "<td class=\"num\">#{a.price_buy&.round(4)}</td>" \
       "<td class=\"num\">#{a.price_sell&.round(4)}</td>" \
       "<td>#{h a.arb_type}</td></tr>"
