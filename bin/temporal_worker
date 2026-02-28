@@ -71,5 +71,80 @@ threads = task_queues.map do |queue|
   end
 end
 
-puts "#{threads.size} workers running. Press Ctrl+C to stop."
+## ══════════════════════════════════════════════════════════════════════════════
+## Watchdog thread: ensures workflows are running for all active cursors
+## ══════════════════════════════════════════════════════════════════════════════
+MAX_RESTART_ATTEMPTS = 3
+WATCHDOG_INTERVAL = 60 # seconds
+
+watchdog_thread = Thread.new do
+  restart_counters = Hash.new(0) # chain_id -> consecutive failure count
+
+  loop do
+    sleep WATCHDOG_INTERVAL
+
+    begin
+      IndexerCursor.where(status: 'running').find_each do |cursor|
+        workflow_id = "evm-indexer-chain-#{cursor.chain_id}"
+        workflow_running = false
+
+        begin
+          handle = client.workflow_handle(workflow_id)
+          desc = handle.describe
+          # status 1 = RUNNING, 2 = CONTINUED_AS_NEW
+          workflow_running = [1, 2].include?(desc.status)
+        rescue StandardError
+          workflow_running = false
+        end
+
+        if workflow_running
+          restart_counters[cursor.chain_id] = 0
+          next
+        end
+
+        # Workflow not running but cursor says running — attempt restart
+        restart_counters[cursor.chain_id] += 1
+        attempt = restart_counters[cursor.chain_id]
+
+        if attempt > MAX_RESTART_ATTEMPTS
+          Rails.logger.error("[Watchdog] Chain #{cursor.chain_id}: exceeded #{MAX_RESTART_ATTEMPTS} restart attempts, marking error")
+          cursor.mark_error!("Watchdog: workflow disappeared, #{MAX_RESTART_ATTEMPTS} restart attempts failed")
+          restart_counters.delete(cursor.chain_id)
+          next
+        end
+
+        Rails.logger.warn("[Watchdog] Chain #{cursor.chain_id}: workflow not running, restarting (attempt #{attempt}/#{MAX_RESTART_ATTEMPTS})")
+
+        begin
+          chain_config = ChainConfig.cached_find(cursor.chain_id)
+          next unless chain_config&.enabled?
+
+          from_block = cursor.last_indexed_block.positive? ? cursor.last_indexed_block + 1 : 0
+
+          client.start_workflow(
+            Indexer::BlockPollerWorkflow,
+            {
+              'chain_id' => cursor.chain_id,
+              'chain_type' => chain_config.chain_type,
+              'start_block' => from_block,
+              'poll_interval_seconds' => chain_config.poll_interval_seconds,
+              'blocks_per_batch' => chain_config.blocks_per_batch
+            },
+            id: workflow_id,
+            task_queue: chain_config.task_queue
+          )
+
+          Rails.logger.info("[Watchdog] Chain #{cursor.chain_id}: workflow restarted successfully from block #{from_block}")
+          restart_counters[cursor.chain_id] = 0
+        rescue StandardError => e
+          Rails.logger.error("[Watchdog] Chain #{cursor.chain_id}: restart failed: #{e.message}")
+        end
+      end
+    rescue StandardError => e
+      Rails.logger.error("[Watchdog] Error in watchdog loop: #{e.message}")
+    end
+  end
+end
+
+puts "#{threads.size} workers + watchdog running. Press Ctrl+C to stop."
 threads.each(&:join)

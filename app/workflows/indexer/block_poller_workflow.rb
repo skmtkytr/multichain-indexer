@@ -158,8 +158,24 @@ module Indexer
         end
       end
 
-      # Continue-as-new to prevent history from growing unbounded
+      # Continue-as-new to prevent history from growing unbounded.
+      # Update the cursor before continue-as-new so the watchdog can recover
+      # if the new execution fails to start.
       @poller_status = 'continuing'
+
+      # Signal that we're about to continue — the watchdog will pick up
+      # from last_indexed_block if the new execution doesn't start.
+      begin
+        Temporalio::Workflow.execute_activity(
+          Indexer::ProcessBlockActivity,
+          { 'action' => 'update_cursor', 'chain_id' => chain_id, 'block_number' => @current_block - 1 },
+          start_to_close_timeout: 10,
+          retry_policy: Temporalio::RetryPolicy.new(max_attempts: 3)
+        )
+      rescue => e
+        Temporalio::Workflow.logger.warn("Failed to update cursor before continue-as-new: #{e.message}")
+      end
+
       raise Temporalio::Workflow::ContinueAsNewError.new(
         {
           'chain_id' => chain_id,
