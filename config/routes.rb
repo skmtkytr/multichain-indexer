@@ -13,6 +13,11 @@ Rails.application.routes.draw do
       # Address monitoring
       get 'address_transfers', to: 'address_transfers#index'
 
+      # DEX / Arbitrage
+      resources :dex_swaps, only: [:index]
+      resources :dex_pools, only: [:index]
+      resources :arb_opportunities, only: [:index]
+
       # Webhook subscriptions
       resources :subscriptions, only: %i[index show create update destroy] do
         post :test, on: :member

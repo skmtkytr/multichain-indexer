@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.1].define(version: 2026_02_24_000002) do
+ActiveRecord::Schema[8.1].define(version: 2026_02_25_000001) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "pg_catalog.plpgsql"
 
@@ -31,6 +31,29 @@ ActiveRecord::Schema[8.1].define(version: 2026_02_24_000002) do
     t.index ["address", "chain_id"], name: "index_address_subscriptions_on_address_and_chain_id"
     t.index ["address"], name: "index_address_subscriptions_on_address"
     t.index ["enabled"], name: "index_address_subscriptions_on_enabled"
+  end
+
+  create_table "arb_opportunities", force: :cascade do |t|
+    t.string "arb_type", null: false
+    t.integer "block_number", null: false
+    t.integer "chain_id", null: false
+    t.datetime "created_at", null: false
+    t.string "dex_buy"
+    t.string "dex_sell"
+    t.decimal "estimated_profit_wei", precision: 78
+    t.string "pool_buy", limit: 42, null: false
+    t.string "pool_sell", limit: 42, null: false
+    t.decimal "price_buy", precision: 38, scale: 18
+    t.decimal "price_sell", precision: 38, scale: 18
+    t.decimal "spread_bps", precision: 10, scale: 2
+    t.string "token_bridge", limit: 42
+    t.string "token_in", limit: 42, null: false
+    t.string "tx_hash_buy"
+    t.string "tx_hash_sell"
+    t.datetime "updated_at", null: false
+    t.index ["chain_id", "block_number"], name: "idx_arb_block"
+    t.index ["chain_id", "spread_bps"], name: "idx_arb_spread"
+    t.index ["created_at"], name: "idx_arb_created"
   end
 
   create_table "asset_transfers", force: :cascade do |t|
@@ -81,6 +104,47 @@ ActiveRecord::Schema[8.1].define(version: 2026_02_24_000002) do
     t.string "trace_method"
     t.datetime "updated_at", null: false
     t.index ["chain_id"], name: "index_chain_configs_on_chain_id", unique: true
+  end
+
+  create_table "dex_pools", force: :cascade do |t|
+    t.integer "chain_id", null: false
+    t.datetime "created_at", null: false
+    t.string "dex_name", null: false
+    t.integer "fee_tier"
+    t.string "pool_address", limit: 42, null: false
+    t.string "token0_address", limit: 42, null: false
+    t.integer "token0_decimals"
+    t.string "token0_symbol"
+    t.string "token1_address", limit: 42, null: false
+    t.integer "token1_decimals"
+    t.string "token1_symbol"
+    t.datetime "updated_at", null: false
+    t.index ["chain_id", "pool_address"], name: "index_dex_pools_on_chain_id_and_pool_address", unique: true
+    t.index ["chain_id", "token0_address", "token1_address"], name: "idx_dex_pools_pair"
+  end
+
+  create_table "dex_swaps", force: :cascade do |t|
+    t.decimal "amount_in", precision: 78, null: false
+    t.decimal "amount_out", precision: 78, null: false
+    t.integer "block_number", null: false
+    t.integer "chain_id", null: false
+    t.datetime "created_at", null: false
+    t.string "dex_name"
+    t.integer "log_index", null: false
+    t.string "pool_address", limit: 42, null: false
+    t.decimal "price", precision: 38, scale: 18
+    t.string "recipient", limit: 42
+    t.string "sender", limit: 42
+    t.decimal "sqrt_price_x96", precision: 78
+    t.integer "tick"
+    t.string "token_in", limit: 42
+    t.string "token_out", limit: 42
+    t.string "tx_hash", null: false
+    t.datetime "updated_at", null: false
+    t.index ["chain_id", "block_number"], name: "idx_dex_swaps_block"
+    t.index ["chain_id", "pool_address", "block_number"], name: "idx_dex_swaps_pool_block"
+    t.index ["chain_id", "token_in", "token_out", "block_number"], name: "idx_dex_swaps_pair_block"
+    t.index ["chain_id", "tx_hash", "log_index"], name: "idx_dex_swaps_unique", unique: true
   end
 
   create_table "event_signatures", force: :cascade do |t|

@@ -56,14 +56,30 @@ class TransferDecoder
         AssetTransfer.upsert_all(transfers, unique_by: %i[chain_id tx_hash transfer_type log_index trace_index])
       end
 
+      # 4. Persist DEX swaps
+      if context.swaps.any?
+        DexSwap.upsert_all(context.swaps, unique_by: %i[chain_id tx_hash log_index])
+      end
+
       token_addresses = transfers.filter_map { |t| t[:token_address] }.uniq
 
-      { transfers: transfers, token_addresses: token_addresses, count: transfers.size }
+      {
+        transfers: transfers,
+        token_addresses: token_addresses,
+        count: transfers.size,
+        swaps: context.swaps,
+        swap_count: context.swaps.size
+      }
     end
   end
 
   # Shared context passed to all decoders
-  DecoderContext = Struct.new(:chain_id, :block_number, :now, keyword_init: true) do
+  DecoderContext = Struct.new(:chain_id, :block_number, :now, :swaps, keyword_init: true) do
+    def initialize(**kwargs)
+      super
+      self.swaps ||= []
+    end
+
     def build_transfer(attrs)
       {
         block_number: block_number,

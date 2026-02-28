@@ -177,9 +177,21 @@ module Indexer
         end
       end
 
+      # 6. Detect arbitrage opportunities from DEX swaps
+      arb_count = 0
+      if transfers[:swap_count].to_i >= 2
+        arbs = ArbDetector.analyze_swaps(
+          chain_id: chain_id,
+          block_number: block_num,
+          swaps: transfers[:swaps]
+        )
+        arb_count = arbs.size
+      end
+
       Rails.logger.info(
         "Indexed block ##{block_num} on chain #{chain_id}: " \
-        "#{tx_records.size} txs, #{log_records.size} logs, #{transfers[:count]} transfers"
+        "#{tx_records.size} txs, #{log_records.size} logs, #{transfers[:count]} transfers, " \
+        "#{transfers[:swap_count]} swaps, #{arb_count} arb opportunities"
       )
 
       # Return only summary (tiny payload)
@@ -189,6 +201,8 @@ module Indexer
         'tx_count' => tx_records.size,
         'log_count' => log_records.size,
         'transfer_count' => transfers[:count],
+        'swap_count' => transfers[:swap_count],
+        'arb_count' => arb_count,
         'token_addresses_count' => token_addresses.size
       }
     end
