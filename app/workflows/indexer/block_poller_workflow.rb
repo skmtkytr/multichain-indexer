@@ -23,6 +23,7 @@ module Indexer
     CATCHUP_BATCH_SIZE = 50          # blocks per BatchFetchActivity call
     CATCHUP_ACTIVITY_TIMEOUT = 300   # 5 min per batch (50 blocks)
     CATCHUP_HEARTBEAT_TIMEOUT = 30   # must heartbeat within 30s
+    DEFAULT_CATCHUP_PARALLEL = 3     # default parallel batches in catch-up mode
 
     CHILD_WF_RETRY_POLICY = Temporalio::RetryPolicy.new(
       max_attempts: 3,
@@ -37,6 +38,7 @@ module Indexer
       poll_interval = params['poll_interval_seconds'] || params[:poll_interval_seconds] || 2
       blocks_per_batch = params['blocks_per_batch'] || params[:blocks_per_batch] || 10
       chain_type = params['chain_type'] || params[:chain_type] || 'evm'
+      catchup_parallel = params['catchup_parallel_batches'] || params[:catchup_parallel_batches] || DEFAULT_CATCHUP_PARALLEL
 
       @current_block = start_block
       @poller_status = 'initializing'
@@ -85,43 +87,65 @@ module Indexer
 
         if gap > CATCHUP_THRESHOLD
           # ══════════════════════════════════════════════════
-          # CATCH-UP MODE: batch processing, max throughput
+          # CATCH-UP MODE: parallel batch processing, max throughput
           # ══════════════════════════════════════════════════
-          @poller_status = "catchup (#{gap} behind)"
+          @poller_status = "catchup (#{gap} behind, #{catchup_parallel}x parallel)"
 
-          end_block = [@current_block + CATCHUP_BATCH_SIZE - 1, latest].min
+          # Build up to catchup_parallel batch ranges
+          batch_ranges = []
+          batch_cursor = @current_block
+          catchup_parallel.times do
+            break if batch_cursor > latest
+            batch_end = [batch_cursor + CATCHUP_BATCH_SIZE - 1, latest].min
+            batch_ranges << { 'from' => batch_cursor, 'to' => batch_end }
+            batch_cursor = batch_end + 1
+          end
 
-          result = begin
-                     Temporalio::Workflow.execute_activity(
-                       Indexer::BatchFetchActivity,
-                       {
-                         'chain_id' => chain_id,
-                         'chain_type' => chain_type,
-                         'from_block' => @current_block,
-                         'to_block' => end_block
-                       },
-                       start_to_close_timeout: CATCHUP_ACTIVITY_TIMEOUT,
-                       heartbeat_timeout: CATCHUP_HEARTBEAT_TIMEOUT,
-                       retry_policy: Temporalio::RetryPolicy.new(
-                         max_attempts: 3,
-                         initial_interval: 5,
-                         backoff_coefficient: 2.0,
-                         max_interval: 60
-                       )
-                     )
-                   rescue => e
-                     Temporalio::Workflow.logger.error("Catch-up batch failed: #{e.message}")
-                     # Sleep and retry on next iteration
-                     Temporalio::Workflow.sleep(poll_interval * 3)
-                     next
-                   end
+          retry_policy = Temporalio::RetryPolicy.new(
+            max_attempts: 3,
+            initial_interval: 5,
+            backoff_coefficient: 2.0,
+            max_interval: 60
+          )
 
-          actual_processed = result['blocks_processed'] || 0
-          if actual_processed > 0
-            @current_block = (result['last_block'] || @current_block) + 1
-            blocks_processed += actual_processed
-          else
-            # Batch produced nothing — sleep and retry
+          # Launch all batches in parallel
+          handles = batch_ranges.map do |range|
+            Temporalio::Workflow.start_activity(
+              Indexer::BatchFetchActivity,
+              {
+                'chain_id' => chain_id,
+                'chain_type' => chain_type,
+                'from_block' => range['from'],
+                'to_block' => range['to']
+              },
+              start_to_close_timeout: CATCHUP_ACTIVITY_TIMEOUT,
+              heartbeat_timeout: CATCHUP_HEARTBEAT_TIMEOUT,
+              retry_policy: retry_policy
+            )
+          end
+
+          # Collect results in order — stop at first failed batch
+          all_ok = true
+          handles.each_with_index do |handle, idx|
+            begin
+              result = handle.result
+              actual_processed = result['blocks_processed'] || 0
+              if actual_processed > 0
+                @current_block = (result['last_block'] || @current_block) + 1
+                blocks_processed += actual_processed
+              end
+              if result['error']
+                all_ok = false
+                break
+              end
+            rescue => e
+              Temporalio::Workflow.logger.error("Catch-up batch #{idx} failed: #{e.message}")
+              all_ok = false
+              break
+            end
+          end
+
+          unless all_ok
             Temporalio::Workflow.sleep(poll_interval * 3)
           end
 
@@ -182,7 +206,8 @@ module Indexer
           'chain_type' => chain_type,
           'start_block' => @current_block,
           'poll_interval_seconds' => poll_interval,
-          'blocks_per_batch' => blocks_per_batch
+          'blocks_per_batch' => blocks_per_batch,
+          'catchup_parallel_batches' => catchup_parallel
         }
       )
     end

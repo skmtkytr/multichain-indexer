@@ -39,6 +39,7 @@ class ChainConfig < ApplicationRecord
   validates :chain_type, inclusion: { in: CHAIN_TYPES }
   validates :poll_interval_seconds, numericality: { greater_than: 0 }
   validates :blocks_per_batch, numericality: { greater_than: 0, less_than_or_equal_to: 100 }
+  validates :catchup_parallel_batches, numericality: { greater_than: 0, less_than_or_equal_to: 10 }
   validates :trace_method, inclusion: { in: %w[debug_traceBlock trace_block], allow_blank: true }
 
   scope :mainnet, -> { where(network_type: "mainnet") }

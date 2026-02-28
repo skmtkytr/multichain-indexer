@@ -50,7 +50,8 @@ module Api
             'chain_type' => chain_config.chain_type,
             'start_block' => from_block,
             'poll_interval_seconds' => chain_config.poll_interval_seconds,
-            'blocks_per_batch' => chain_config.blocks_per_batch
+            'blocks_per_batch' => chain_config.blocks_per_batch,
+            'catchup_parallel_batches' => chain_config.catchup_parallel_batches
           },
           id: "evm-indexer-chain-#{chain_id}",
           task_queue: chain_config.task_queue
