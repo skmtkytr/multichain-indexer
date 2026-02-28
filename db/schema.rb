@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.1].define(version: 2026_02_25_100001) do
+ActiveRecord::Schema[8.1].define(version: 2026_03_01_000001) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "pg_catalog.plpgsql"
 
@@ -84,6 +84,7 @@ ActiveRecord::Schema[8.1].define(version: 2026_02_25_100001) do
     t.string "block_tag", default: "finalized", null: false
     t.integer "block_time_ms", default: 12000
     t.integer "blocks_per_batch", default: 10
+    t.integer "catchup_parallel_batches", default: 3, null: false
     t.integer "chain_id", null: false
     t.string "chain_type", default: "evm", null: false
     t.integer "confirmation_blocks", default: 0, null: false

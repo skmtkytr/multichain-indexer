@@ -21,8 +21,7 @@ module Indexer
     GET_LATEST_START_TO_CLOSE = 15
     CATCHUP_THRESHOLD = 50           # switch to catch-up if behind by this many blocks
     CATCHUP_BATCH_SIZE = 50          # blocks per BatchFetchActivity call
-    CATCHUP_ACTIVITY_TIMEOUT = 300   # 5 min per batch (50 blocks)
-    CATCHUP_HEARTBEAT_TIMEOUT = 30   # must heartbeat within 30s
+    CATCHUP_CHILD_TIMEOUT = 360      # 6 min per batch child workflow
     DEFAULT_CATCHUP_PARALLEL = 3     # default parallel batches in catch-up mode
 
     CHILD_WF_RETRY_POLICY = Temporalio::RetryPolicy.new(
@@ -108,18 +107,19 @@ module Indexer
             max_interval: 60
           )
 
-          # Launch all batches in parallel
+          # Launch all batches in parallel via child workflows
+          task_queue = Temporalio::Workflow.info.task_queue
           handles = batch_ranges.map do |range|
-            Temporalio::Workflow.start_activity(
-              Indexer::BatchFetchActivity,
+            Temporalio::Workflow.start_child_workflow(
+              Indexer::BatchProcessorWorkflow,
               {
                 'chain_id' => chain_id,
                 'chain_type' => chain_type,
                 'from_block' => range['from'],
                 'to_block' => range['to']
               },
-              start_to_close_timeout: CATCHUP_ACTIVITY_TIMEOUT,
-              heartbeat_timeout: CATCHUP_HEARTBEAT_TIMEOUT,
+              id: "catchup-batch-#{chain_id}-#{range['from']}-#{range['to']}",
+              task_queue: task_queue,
               retry_policy: retry_policy
             )
           end
