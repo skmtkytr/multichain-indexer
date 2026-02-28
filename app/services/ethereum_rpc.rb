@@ -179,7 +179,14 @@ class EthereumRpc
         @current_index = idx
         return result
       rescue RpcError => e
-        # RPC-level error (method not found, etc.) — don't fallback, propagate
+        # Rate limit errors should try next endpoint
+        if e.message&.match?(RATE_LIMIT_PATTERN)
+          last_error = e
+          Rails.logger.warn("RPC #{@rpc_urls[idx]} rate limited (#{method}), trying next endpoint...")
+          sleep(0.5)  # brief cooldown before next endpoint
+          next
+        end
+        # Other RPC-level errors (method not found, etc.) — don't fallback, propagate
         raise
       rescue => e
         last_error = e
