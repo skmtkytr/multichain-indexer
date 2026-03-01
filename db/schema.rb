@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.1].define(version: 2026_03_01_000002) do
+ActiveRecord::Schema[8.1].define(version: 2026_03_01_030000) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "pg_catalog.plpgsql"
 
@@ -43,8 +43,8 @@ ActiveRecord::Schema[8.1].define(version: 2026_03_01_000002) do
     t.decimal "estimated_profit_wei", precision: 78
     t.string "pool_buy", limit: 42, null: false
     t.string "pool_sell", limit: 42, null: false
-    t.decimal "price_buy", precision: 78
-    t.decimal "price_sell", precision: 78
+    t.decimal "price_buy", precision: 38, scale: 18
+    t.decimal "price_sell", precision: 38, scale: 18
     t.decimal "spread_bps", precision: 10, scale: 2
     t.string "token_bridge", limit: 42
     t.string "token_in", limit: 42, null: false

@@ -149,8 +149,8 @@ class ArbDetector
           pool_sell:            high_pool,
           dex_buy:              low_data[:dex_name],
           dex_sell:             high_data[:dex_name],
-          price_buy:            low_data[:price].to_f,
-          price_sell:           high_data[:price].to_f,
+          price_buy:            low_data[:price],
+          price_sell:           high_data[:price],
           spread_bps:           spread_bps.round(2),
           estimated_profit_wei: nil,  # TODO: estimate with liquidity depth
           arb_type:             'direct',
