@@ -243,6 +243,7 @@ class EthereumRpc
       if parsed["error"]
         msg = parsed["error"]["message"]
         code = parsed["error"]["code"]
+        Rails.logger.warn("[RPC] Error response: code=#{code.inspect} msg=#{msg.inspect} data=#{parsed.dig('error', 'data').inspect}")
 
         if NON_RETRYABLE_CODES.include?(code) || msg&.match?(NON_RETRYABLE_PATTERNS)
           raise NonRetryableError, "#{method}: #{msg} (code: #{code})"
