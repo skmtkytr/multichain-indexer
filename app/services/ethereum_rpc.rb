@@ -59,25 +59,43 @@ class EthereumRpc
     call_with_fallback("eth_getLogs", [filter])
   end
 
-  # JSON-RPC batch: send multiple calls in one HTTP request
+  # JSON-RPC batch: send multiple calls in one HTTP request (with rate-limit retry)
   def batch_call(requests)
-    batch_body = requests.map do |req|
-      @request_id += 1
-      { jsonrpc: "2.0", method: req[:method], params: req[:params] || [], id: @request_id }
-    end
+    retries = 0
 
-    response_body = http_post_with_fallback(batch_body.to_json)
-    parsed = JSON.parse(response_body)
+    loop do
+      batch_body = requests.map do |req|
+        @request_id += 1
+        { jsonrpc: "2.0", method: req[:method], params: req[:params] || [], id: @request_id }
+      end
 
-    # Some RPCs return a single object instead of an array for batch requests
-    parsed = [parsed] if parsed.is_a?(Hash)
-    unless parsed.is_a?(Array)
-      raise RpcError, "Unexpected batch response type: #{parsed.class} — #{response_body[0..200]}"
-    end
+      response_body = http_post_with_fallback(batch_body.to_json)
+      parsed = JSON.parse(response_body)
 
-    parsed.sort_by { |r| r["id"].to_i }.map do |r|
-      raise RpcError, r["error"]["message"] if r["error"]
-      r["result"]
+      # Some RPCs return a single object instead of an array for batch requests
+      parsed = [parsed] if parsed.is_a?(Hash)
+      unless parsed.is_a?(Array)
+        raise RpcError, "Unexpected batch response type: #{parsed.class} — #{response_body[0..200]}"
+      end
+
+      # Check if any response has a rate limit error — if so, backoff and retry
+      rate_error = parsed.find { |r| r["error"] && (r["error"]["code"] == RATE_LIMIT_CODE || r["error"]["message"]&.match?(RATE_LIMIT_PATTERN)) }
+      if rate_error
+        retries += 1
+        raise RpcError, rate_error["error"]["message"] if retries > RATE_LIMIT_MAX_RETRIES
+
+        delay = rate_error.dig("error", "data", "try_again_in")&.then { |d| d.to_f / 1000.0 }
+        delay ||= RATE_LIMIT_BASE_DELAY * (2 ** (retries - 1))
+        delay = [delay, 5.0].min
+        Rails.logger.warn("[RPC] Batch rate limited, retry #{retries}/#{RATE_LIMIT_MAX_RETRIES}, sleeping #{delay}s")
+        sleep(delay)
+        next
+      end
+
+      return parsed.sort_by { |r| r["id"].to_i }.map do |r|
+        raise RpcError, r["error"]["message"] if r["error"]
+        r["result"]
+      end
     end
   end
 
