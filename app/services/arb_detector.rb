@@ -140,6 +140,9 @@ class ArbDetector
 
         next if spread_bps < MIN_SPREAD_BPS
 
+        # Same-TX swaps = someone already executed this arb (flashloan/multi-hop)
+        same_tx = low_data[:tx_hash] == high_data[:tx_hash]
+
         opportunities << {
           chain_id:             chain_id,
           block_number:         block_number,
@@ -156,6 +159,7 @@ class ArbDetector
           arb_type:             'direct',
           tx_hash_buy:          low_data[:tx_hash],
           tx_hash_sell:         high_data[:tx_hash],
+          executed:             same_tx,
           created_at:           Time.current,
           updated_at:           Time.current
         }

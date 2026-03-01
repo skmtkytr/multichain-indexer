@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.1].define(version: 2026_03_01_030000) do
+ActiveRecord::Schema[8.1].define(version: 2026_03_01_040000) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "pg_catalog.plpgsql"
 
@@ -41,6 +41,7 @@ ActiveRecord::Schema[8.1].define(version: 2026_03_01_030000) do
     t.string "dex_buy"
     t.string "dex_sell"
     t.decimal "estimated_profit_wei", precision: 78
+    t.boolean "executed", default: false, null: false
     t.string "pool_buy", limit: 42, null: false
     t.string "pool_sell", limit: 42, null: false
     t.decimal "price_buy", precision: 38, scale: 18
@@ -54,6 +55,7 @@ ActiveRecord::Schema[8.1].define(version: 2026_03_01_030000) do
     t.index ["chain_id", "block_number"], name: "idx_arb_block"
     t.index ["chain_id", "spread_bps"], name: "idx_arb_spread"
     t.index ["created_at"], name: "idx_arb_created"
+    t.index ["executed"], name: "index_arb_opportunities_on_executed"
   end
 
   create_table "asset_transfers", force: :cascade do |t|
