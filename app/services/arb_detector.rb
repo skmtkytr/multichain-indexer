@@ -15,6 +15,11 @@ class ArbDetector
   # Minimum spread in basis points to record as opportunity
   MIN_SPREAD_BPS = 5  # 0.05%
 
+  # Minimum swap value in the "base" token (pair[0]) after decimal normalization.
+  # Swaps below this threshold are excluded — too small to be meaningful for arb.
+  # This filters out dust trades that produce unreliable prices.
+  MIN_SWAP_VALUE_BASE = BigDecimal('0.001')  # e.g., 0.001 WBTC (~$95), 0.001 WETH (~$2)
+
   class << self
     # Analyze a block that's already indexed — reads from DB
     def analyze_block(chain_id:, block_number:)
@@ -102,24 +107,38 @@ class ArbDetector
           next
         end
 
-        # For each pool, compute average effective price (normalized: token_pair[0] → token_pair[1])
+        # For each pool, compute volume-weighted average price (VWAP)
+        # normalized as: pair[1] amount / pair[0] amount (both decimal-adjusted)
         pool_prices = {}
         by_pool.each do |pool_addr, pool_swaps|
-          prices = pool_swaps.filter_map do |s|
-            next nil unless s.amount_in.to_i > 0 && s.amount_out.to_i > 0
+          total_base = BigDecimal('0')  # sum of pair[0] token amounts (decimal-adjusted)
+          total_quote = BigDecimal('0') # sum of pair[1] token amounts (decimal-adjusted)
 
-            # Normalize: price = pair[1] adjusted amount / pair[0] adjusted amount
+          pool_swaps.each do |s|
+            next unless s.amount_in.to_i > 0 && s.amount_out.to_i > 0
+
             if s.token_in == pair[0]
-              normalized_price(s.amount_in, s.amount_out, dec0, dec1)
+              base_adj  = BigDecimal(s.amount_in.to_s) / BigDecimal(10)**dec0
+              quote_adj = BigDecimal(s.amount_out.to_s) / BigDecimal(10)**dec1
             else
-              normalized_price(s.amount_out, s.amount_in, dec0, dec1)
+              base_adj  = BigDecimal(s.amount_out.to_s) / BigDecimal(10)**dec0
+              quote_adj = BigDecimal(s.amount_in.to_s) / BigDecimal(10)**dec1
             end
-          end
-          next if prices.empty?
 
-          avg_price = prices.sum / prices.size
+            # Skip dust trades — unreliable prices
+            next if base_adj < MIN_SWAP_VALUE_BASE
+
+            total_base += base_adj
+            total_quote += quote_adj
+          end
+
+          # Skip pools with no qualifying swaps
+          next if total_base.zero?
+
+          vwap = total_quote / total_base
           pool_prices[pool_addr] = {
-            price: avg_price,
+            price: vwap,
+            volume_base: total_base,
             dex_name: pool_swaps.first.dex_name,
             tx_hash: pool_swaps.last.tx_hash
           }
@@ -143,6 +162,11 @@ class ArbDetector
         # Same-TX swaps = someone already executed this arb (flashloan/multi-hop)
         same_tx = low_data[:tx_hash] == high_data[:tx_hash]
 
+        # Estimate profit: use the smaller pool's volume as max executable size
+        # Profit ≈ min_volume × spread (in quote token terms)
+        min_volume = [low_data[:volume_base], high_data[:volume_base]].min
+        est_profit_quote = min_volume * (high_data[:price] - low_data[:price])
+
         opportunities << {
           chain_id:             chain_id,
           block_number:         block_number,
@@ -155,7 +179,7 @@ class ArbDetector
           price_buy:            low_data[:price],
           price_sell:           high_data[:price],
           spread_bps:           spread_bps.round(2),
-          estimated_profit_wei: nil,  # TODO: estimate with liquidity depth
+          estimated_profit_wei: est_profit_quote,
           arb_type:             'direct',
           tx_hash_buy:          low_data[:tx_hash],
           tx_hash_sell:         high_data[:tx_hash],
