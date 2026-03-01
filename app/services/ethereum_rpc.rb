@@ -283,6 +283,9 @@ class EthereumRpc
     request.body = body
 
     response = http.request(request)
+    unless response.code == '200'
+      Rails.logger.warn("[RPC] HTTP #{response.code} from #{rpc_url[0..50]}: #{response.body[0..200]}")
+    end
     response.body
   end
 
