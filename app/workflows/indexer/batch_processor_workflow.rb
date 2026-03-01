@@ -6,7 +6,7 @@ module Indexer
   # Thin child workflow wrapper around BatchFetchActivity.
   # Exists solely to enable parallel catch-up batches via start_child_workflow.
   class BatchProcessorWorkflow < Temporalio::Workflow::Definition
-    ACTIVITY_TIMEOUT = 300   # 5 min per batch
+    ACTIVITY_TIMEOUT = 600   # 10 min per batch (rate-limited RPCs need more time)
     HEARTBEAT_TIMEOUT = 30
 
     def execute(params)

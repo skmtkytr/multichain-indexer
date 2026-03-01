@@ -88,15 +88,46 @@ module Api
       def status
         chain_id = params.fetch(:chain_id, 1).to_i
         cursor = IndexerCursor.find_by(chain_id: chain_id)
+        chain_config = ChainConfig.find_by(chain_id: chain_id)
+
+        # Get latest block from RPC if chain is configured
+        latest_block = nil
+        if chain_config&.evm? && chain_config&.enabled?
+          begin
+            rpc = EthereumRpc.new(chain_id: chain_id)
+            latest_block = rpc.get_block_number
+          rescue StandardError => e
+            Rails.logger.warn("Failed to get latest block for chain #{chain_id}: #{e.message}")
+          end
+        end
+
+        current_block = cursor&.last_indexed_block || 0
+
+        # Collect RPC rate limiter stats for this chain's endpoints
+        rpc_stats = {}
+        if chain_config
+          urls = chain_config.rpc_url_list
+          urls.each do |url|
+            s = RpcRateLimiter.stats(url)
+            next unless s
+            # Aggregate across endpoints
+            rpc_stats[:requests_per_second] = (rpc_stats[:requests_per_second] || 0) + s[:rate]
+            rpc_stats[:throttled_count] = (rpc_stats[:throttled_count] || 0) + s[:throttled_count]
+            rpc_stats[:total_requests] = (rpc_stats[:total_requests] || 0) + s[:total_requests]
+          end
+        end
 
         stats = {
           chain_id: chain_id,
           status: cursor&.status || 'not_initialized',
-          last_indexed_block: cursor&.last_indexed_block || 0,
+          current_block: current_block,
+          latest_block: latest_block,
+          gap: latest_block ? latest_block - current_block : nil,
           error: cursor&.error_message,
           blocks_count: IndexedBlock.by_chain(chain_id).count,
           transactions_count: IndexedTransaction.by_chain(chain_id).count,
-          logs_count: IndexedLog.by_chain(chain_id).count
+          logs_count: IndexedLog.by_chain(chain_id).count,
+          rpc_stats: rpc_stats.presence
         }
 
         render json: stats

@@ -20,8 +20,8 @@ module Indexer
 
     GET_LATEST_START_TO_CLOSE = 15
     CATCHUP_THRESHOLD = 50           # switch to catch-up if behind by this many blocks
-    CATCHUP_BATCH_SIZE = 50          # blocks per BatchFetchActivity call
-    CATCHUP_CHILD_TIMEOUT = 360      # 6 min per batch child workflow
+    CATCHUP_BATCH_SIZE = 10          # blocks per BatchFetchActivity call (keep small for rate-limited RPCs)
+    CATCHUP_CHILD_TIMEOUT = 600      # 10 min per batch child workflow
     DEFAULT_CATCHUP_PARALLEL = 3     # default parallel batches in catch-up mode
     LIVE_CHILD_INTERVAL = 1          # seconds between child workflow launches in live mode
 

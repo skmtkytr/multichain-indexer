@@ -33,7 +33,48 @@ class ArbDetector
       detect_direct_arb(chain_id, block_number, swap_objects)
     end
 
+    # Compute decimal-normalized price: amount_out / amount_in adjusted for decimals.
+    # Returns nil if either adjusted amount is zero.
+    def normalized_price(amount_in, amount_out, decimals_in, decimals_out)
+      adj_in  = BigDecimal(amount_in.to_s) / BigDecimal(10)**decimals_in
+      adj_out = BigDecimal(amount_out.to_s) / BigDecimal(10)**decimals_out
+      return nil if adj_in.zero? || adj_out.zero?
+
+      adj_out / adj_in
+    end
+
     private
+
+    # In-memory decimals cache: address -> Integer (or nil)
+    def decimals_cache
+      @decimals_cache ||= {}
+    end
+
+    # Look up decimals for a token address, with in-memory caching.
+    # Returns Integer decimals or nil if unknown.
+    def fetch_decimals(chain_id, address)
+      addr = address.downcase
+      cache_key = "#{chain_id}:#{addr}"
+
+      return decimals_cache[cache_key] if decimals_cache.key?(cache_key)
+
+      # Check well-known tokens first (mainnet only)
+      if chain_id == 1 && TokenMetadataFetcher::KNOWN_TOKENS.key?(addr)
+        dec = TokenMetadataFetcher::KNOWN_TOKENS[addr][:decimals]
+        decimals_cache[cache_key] = dec
+        return dec
+      end
+
+      tc = TokenContract.find_by(address: addr, chain_id: chain_id)
+      dec = tc&.decimals
+      decimals_cache[cache_key] = dec
+      dec
+    end
+
+    # Clear the decimals cache (useful for testing)
+    def clear_decimals_cache!
+      @decimals_cache = {}
+    end
 
     # Direct arbitrage: same token pair, different pools, different prices
     def detect_direct_arb(chain_id, block_number, swaps)
@@ -51,17 +92,27 @@ class ArbDetector
         by_pool = pair_swaps.group_by(&:pool_address)
         next if by_pool.size < 2
 
+        # Fetch decimals for this pair
+        dec0 = fetch_decimals(chain_id, pair[0])
+        dec1 = fetch_decimals(chain_id, pair[1])
+
+        # Skip pairs where decimals are unknown (prevents false positives)
+        if dec0.nil? || dec1.nil?
+          Rails.logger.debug("[ArbDetector] Skipping pair #{pair[0]}/#{pair[1]}: decimals unknown (#{dec0.inspect}/#{dec1.inspect})")
+          next
+        end
+
         # For each pool, compute average effective price (normalized: token_pair[0] → token_pair[1])
         pool_prices = {}
         by_pool.each do |pool_addr, pool_swaps|
           prices = pool_swaps.filter_map do |s|
             next nil unless s.amount_in.to_i > 0 && s.amount_out.to_i > 0
 
-            # Normalize: price = pair[1] amount / pair[0] amount
+            # Normalize: price = pair[1] adjusted amount / pair[0] adjusted amount
             if s.token_in == pair[0]
-              BigDecimal(s.amount_out.to_s) / BigDecimal(s.amount_in.to_s)
+              normalized_price(s.amount_in, s.amount_out, dec0, dec1)
             else
-              BigDecimal(s.amount_in.to_s) / BigDecimal(s.amount_out.to_s)
+              normalized_price(s.amount_out, s.amount_in, dec0, dec1)
             end
           end
           next if prices.empty?

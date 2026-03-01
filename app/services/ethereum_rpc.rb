@@ -9,17 +9,28 @@ class EthereumRpc
 
   def initialize(rpc_url: nil, chain_id: nil)
     @chain_id = chain_id
-    @rpc_urls = if rpc_url
-                  [rpc_url]
-                elsif chain_id
-                  config = ChainConfig.find_by(chain_id: chain_id)
-                  config&.rpc_url_list || [ENV.fetch("ETHEREUM_RPC_URL")]
-                else
-                  [ENV.fetch("ETHEREUM_RPC_URL")]
-                end
+    @rpc_rate_limits = {} # url -> rps override
+
+    if rpc_url
+      @rpc_urls = [rpc_url]
+    elsif chain_id
+      config = ChainConfig.find_by(chain_id: chain_id)
+      if config
+        @rpc_urls = config.rpc_url_list.presence || [ENV.fetch("ETHEREUM_RPC_URL")]
+        # Extract per-endpoint rate limits from rpc_endpoints config
+        (config.rpc_endpoints || []).each do |ep|
+          @rpc_rate_limits[ep["url"]] = ep["rate_limit"].to_i if ep["url"].present? && ep["rate_limit"].present?
+        end
+      else
+        @rpc_urls = [ENV.fetch("ETHEREUM_RPC_URL")]
+      end
+    else
+      @rpc_urls = [ENV.fetch("ETHEREUM_RPC_URL")]
+    end
+
     @current_index = 0
     @request_id = 0
-    @batch_limit = 10
+    @batch_limit = 5  # Keep small: each batch item counts as 1 RPC call for rate limiting
   end
 
   # Get latest block number (any tag: "latest", "finalized", "safe")
@@ -219,9 +230,17 @@ class EthereumRpc
   def http_post_with_fallback(body)
     last_error = nil
 
+    # Count requests in the batch for rate limiting
+    batch_size = begin
+      JSON.parse(body).size
+    rescue
+      1
+    end
+
     @rpc_urls.size.times do |offset|
       idx = (@current_index + offset) % @rpc_urls.size
       begin
+        acquire_rate_limit(@rpc_urls[idx], tokens: batch_size)
         result = http_post(@rpc_urls[idx], body)
         @current_index = idx
         return result
@@ -245,11 +264,18 @@ class EthereumRpc
   RATE_LIMIT_MAX_RETRIES = 5
   RATE_LIMIT_BASE_DELAY = 0.3  # seconds
 
+  # Acquire rate limit tokens for a given RPC URL
+  def acquire_rate_limit(rpc_url, tokens: 1)
+    rate = @rpc_rate_limits[rpc_url]
+    RpcRateLimiter.acquire(rpc_url, tokens: tokens, rate: rate)
+  end
+
   # Single JSON-RPC call to a specific URL (with rate-limit backoff)
   def call_single(rpc_url, method, params = [])
     retries = 0
 
     loop do
+      acquire_rate_limit(rpc_url)
       @request_id += 1
       body = { jsonrpc: "2.0", method: method, params: params, id: @request_id }.to_json
 
