@@ -238,6 +238,8 @@ class EthereumRpc
       response_body = http_post(rpc_url, body)
       parsed = JSON.parse(response_body)
 
+      Rails.logger.debug("[RPC] #{method} -> #{rpc_url[0..50]}... retries=#{retries}")
+
       if parsed["error"]
         msg = parsed["error"]["message"]
         code = parsed["error"]["code"]
@@ -255,6 +257,7 @@ class EthereumRpc
           delay = parsed.dig("error", "data", "try_again_in")&.then { |d| d.to_f / 1000.0 }
           delay ||= RATE_LIMIT_BASE_DELAY * (2 ** (retries - 1))
           delay = [delay, 5.0].min  # cap at 5s
+          Rails.logger.warn("[RPC] Rate limited on #{rpc_url[0..50]}, retry #{retries}/#{RATE_LIMIT_MAX_RETRIES}, sleeping #{delay}s")
           sleep(delay)
           next
         end
