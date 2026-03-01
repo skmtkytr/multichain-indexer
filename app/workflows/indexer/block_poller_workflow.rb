@@ -23,6 +23,7 @@ module Indexer
     CATCHUP_BATCH_SIZE = 50          # blocks per BatchFetchActivity call
     CATCHUP_CHILD_TIMEOUT = 360      # 6 min per batch child workflow
     DEFAULT_CATCHUP_PARALLEL = 3     # default parallel batches in catch-up mode
+    LIVE_CHILD_INTERVAL = 1          # seconds between child workflow launches in live mode
 
     CHILD_WF_RETRY_POLICY = Temporalio::RetryPolicy.new(
       max_attempts: 3,
@@ -158,22 +159,24 @@ module Indexer
           end_block = [@current_block + blocks_per_batch - 1, latest].min
           task_queue = Temporalio::Workflow.info.task_queue
 
-          handles = (@current_block..end_block).map do |block_number|
-            Temporalio::Workflow.start_child_workflow(
+          # Launch child workflows sequentially with interval to avoid rate limiting
+          (@current_block..end_block).each do |block_number|
+            handle = Temporalio::Workflow.start_child_workflow(
               processor_workflow,
               { 'chain_id' => chain_id, 'block_number' => block_number },
               id: "process-block-#{chain_id}-#{block_number}",
               task_queue: task_queue,
               retry_policy: CHILD_WF_RETRY_POLICY
             )
-          end
 
-          handles.each do |handle|
             begin
               handle.result
             rescue => e
-              Temporalio::Workflow.logger.error("Child workflow failed: #{e.message}")
+              Temporalio::Workflow.logger.error("Child workflow failed for block #{block_number}: #{e.message}")
             end
+
+            # Small delay between blocks to spread RPC calls and avoid rate limits
+            Temporalio::Workflow.sleep(LIVE_CHILD_INTERVAL) if block_number < end_block
           end
 
           batch_size = end_block - @current_block + 1

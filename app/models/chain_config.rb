@@ -79,7 +79,7 @@ class ChainConfig < ApplicationRecord
   # Default chain configs with public RPCs
   DEFAULTS = {
     # EVM chains
-    1 => { name: "Ethereum", rpc_url: "https://eth.llamarpc.com", explorer_url: "https://etherscan.io", native_currency: "ETH", block_time_ms: 12_000, network_type: "mainnet", chain_type: "evm" },
+    1 => { name: "Ethereum", rpc_url: "https://eth.llamarpc.com", explorer_url: "https://etherscan.io", native_currency: "ETH", block_time_ms: 12_000, network_type: "mainnet", chain_type: "evm", blocks_per_batch: 3, catchup_parallel_batches: 1 },
     10 => { name: "Optimism", rpc_url: "https://mainnet.optimism.io", explorer_url: "https://optimistic.etherscan.io", native_currency: "ETH", block_time_ms: 2000, network_type: "mainnet", chain_type: "evm" },
     137 => { name: "Polygon", rpc_url: "https://polygon-bor-rpc.publicnode.com", explorer_url: "https://polygonscan.com", native_currency: "MATIC", block_time_ms: 2000, network_type: "mainnet", chain_type: "evm" },
     8453 => { name: "Base", rpc_url: "https://mainnet.base.org", explorer_url: "https://basescan.org", native_currency: "ETH", block_time_ms: 2000, network_type: "mainnet", chain_type: "evm" },
